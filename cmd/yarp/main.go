@@ -24,10 +24,11 @@ const (
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
-	configPath := flag.String("config", "yarp.yml", "path to the config file (required)")
+	configPath := flag.String("config", "yarp.yml", "path to the config file")
 	flag.Parse()
 
-	cfg, err := loadConfig(*configPath)
+	// Routes are not used until request routing is implemented.
+	cfg, _, err := loadConfig(*configPath)
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
@@ -53,14 +54,22 @@ func main() {
 	slog.Info("yarp stopped")
 }
 
-// loadConfig loads and validates the config file at path.
-func loadConfig(path string) (*config.Config, error) {
+// loadConfig loads and validates the config file at path, then the routes
+// from the configured provider.
+func loadConfig(path string) (*config.Config, *config.RoutesConfig, error) {
 	cfg, err := config.Load(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	slog.Info("config loaded", "path", path, "entryPoints", len(cfg.EntryPoints))
-	return cfg, nil
+
+	fp := cfg.Providers.File
+	routes, err := config.LoadRoutes(fp.Filename, cfg.EntryPoints)
+	if err != nil {
+		return nil, nil, fmt.Errorf("file provider: %w", err)
+	}
+	slog.Info("routes loaded", "provider", "file", "path", fp.Filename, "routes", len(routes.Routes))
+	return cfg, routes, nil
 }
 
 // serve runs an HTTP server for the named entry point until ctx is
