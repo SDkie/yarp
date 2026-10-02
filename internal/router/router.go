@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SDkie/yarp/internal/cache"
 	"github.com/SDkie/yarp/internal/config"
+	"github.com/SDkie/yarp/internal/middleware"
 )
 
 // Router is the http.Handler for one entry point. It sends each request to
@@ -37,7 +39,7 @@ type route struct {
 // It fails if two routes on the same entry point have the same host and
 // pathPrefix, since only one of them could ever match. All routes share one
 // backend transport, so they reuse the same connection pool.
-func Build(entryPoints map[string]config.EntryPoint, routes map[string]config.Route) (map[string]http.Handler, error) {
+func Build(entryPoints map[string]config.EntryPoint, routes map[string]config.Route, c *cache.Cache) (map[string]http.Handler, error) {
 	transport := newTransport()
 	byEntryPoint := make(map[string][]route, len(entryPoints))
 	for _, name := range slices.Sorted(maps.Keys(routes)) {
@@ -50,7 +52,7 @@ func Build(entryPoints map[string]config.EntryPoint, routes map[string]config.Ro
 			name:       name,
 			host:       normalizeHost(r.Host),
 			pathPrefix: cmp.Or(r.PathPrefix, "/"),
-			handler:    proxy,
+			handler:    middleware.HTTPCache(c, proxy),
 		}
 		for _, ep := range r.EntryPoints {
 			byEntryPoint[ep] = append(byEntryPoint[ep], rt)

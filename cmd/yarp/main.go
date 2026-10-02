@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/SDkie/yarp/internal/cache"
 	"github.com/SDkie/yarp/internal/config"
 	"github.com/SDkie/yarp/internal/router"
 	"golang.org/x/sync/errgroup"
@@ -34,9 +35,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	handlers, err := router.Build(cfg.EntryPoints, routes.Routes)
+	c, err := cache.Open()
+	if err != nil {
+		slog.Error("failed to open cache", "error", err)
+		os.Exit(1)
+	}
+
+	handlers, err := router.Build(cfg.EntryPoints, routes.Routes, c)
 	if err != nil {
 		slog.Error("failed to build routers", "error", err)
+		closeCache(c)
 		os.Exit(1)
 	}
 
@@ -53,11 +61,20 @@ func main() {
 
 	err = g.Wait()
 	stop()
+	closeCache(c)
 	if err != nil {
 		slog.Error("yarp exited with error", "error", err)
 		os.Exit(1)
 	}
 	slog.Info("yarp stopped")
+}
+
+// closeCache flushes and closes the cache. It is called explicitly rather
+// than deferred, because os.Exit skips deferred calls.
+func closeCache(c *cache.Cache) {
+	if err := c.Close(); err != nil {
+		slog.Error("failed to close cache", "error", err)
+	}
 }
 
 // loadConfig loads and validates the config file at path, then the routes
