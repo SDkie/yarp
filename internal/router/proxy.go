@@ -2,13 +2,11 @@ package router
 
 import (
 	"fmt"
-	"log/slog"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
-	"sync/atomic"
 
 	"github.com/SDkie/yarp/internal/config"
+	"github.com/SDkie/yarp/internal/proxy"
 )
 
 // newProxy returns a handler that forwards requests to servers, picking
@@ -23,18 +21,5 @@ func newProxy(route string, servers []config.Server) (http.Handler, error) {
 		}
 		targets[i] = u
 	}
-
-	var next atomic.Uint64
-	return &httputil.ReverseProxy{
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			target := targets[(next.Add(1)-1)%uint64(len(targets))]
-			pr.SetURL(target)
-			pr.Out.Host = pr.In.Host
-			pr.SetXForwarded()
-		},
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			slog.Error("proxy error", "route", route, "server", r.URL.Host, "error", err)
-			w.WriteHeader(http.StatusBadGateway)
-		},
-	}, nil
+	return proxy.New(route, targets, http.DefaultTransport), nil
 }
