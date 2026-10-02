@@ -10,9 +10,10 @@ import (
 )
 
 // newProxy returns a handler that forwards requests to servers, picking
-// them round-robin. The request path is forwarded unchanged and the
-// original Host header is kept.
-func newProxy(route string, servers []config.Server) (http.Handler, error) {
+// them round-robin. The request path is appended to the server's base path,
+// the query is merged with the server's query, and the original Host header
+// is kept.
+func newProxy(route string, servers []config.Server, transport http.RoundTripper) (http.Handler, error) {
 	targets := make([]*url.URL, len(servers))
 	for i, s := range servers {
 		u, err := url.Parse(s.URL)
@@ -21,5 +22,5 @@ func newProxy(route string, servers []config.Server) (http.Handler, error) {
 		}
 		targets[i] = u
 	}
-	return proxy.New(route, targets, http.DefaultTransport), nil
+	return proxy.New(route, targets, transport), nil
 }

@@ -35,12 +35,14 @@ type route struct {
 // Build returns one handler per entry point, serving the routes that list
 // that entry point. Entry points without routes answer 404 to every request.
 // It fails if two routes on the same entry point have the same host and
-// pathPrefix, since only one of them could ever match.
+// pathPrefix, since only one of them could ever match. All routes share one
+// backend transport, so they reuse the same connection pool.
 func Build(entryPoints map[string]config.EntryPoint, routes map[string]config.Route) (map[string]http.Handler, error) {
+	transport := newTransport()
 	byEntryPoint := make(map[string][]route, len(entryPoints))
 	for _, name := range slices.Sorted(maps.Keys(routes)) {
 		r := routes[name]
-		proxy, err := newProxy(name, r.Servers)
+		proxy, err := newProxy(name, r.Servers, transport)
 		if err != nil {
 			return nil, err
 		}

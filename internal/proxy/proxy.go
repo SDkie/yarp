@@ -34,8 +34,8 @@ var hopHeaders = []string{
 }
 
 // ReverseProxy forwards each request to one of its servers, round-robin.
-// The request path and query are forwarded unchanged and the original Host
-// header is kept.
+// The request path is appended to the server's base path, the query is
+// merged with the server's query, and the original Host header is kept.
 type ReverseProxy struct {
 	name      string
 	servers   []*url.URL
@@ -242,13 +242,18 @@ func abortConnection(w http.ResponseWriter) {
 	conn.Close()
 }
 
+// copyBufferSize is the maximum number of response body bytes copied per
+// read and write. Reads return as soon as any bytes arrive, so this never
+// delays small chunks.
+const copyBufferSize = 32 * 1024
+
 var errBackendRead = errors.New("read from backend")
 
 // copyBody copies the backend body to the client, flushing after each write
 // when flush is true. Read errors are wrapped with errBackendRead.
 func copyBody(w http.ResponseWriter, body io.Reader, flush bool) error {
 	rc := http.NewResponseController(w)
-	buf := make([]byte, 32*1024)
+	buf := make([]byte, copyBufferSize)
 	for {
 		n, rerr := body.Read(buf)
 		if n > 0 {
