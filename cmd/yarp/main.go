@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/SDkie/yarp/internal/config"
+	"github.com/SDkie/yarp/internal/router"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -27,10 +28,15 @@ func main() {
 	configPath := flag.String("config", "yarp.yml", "path to the config file")
 	flag.Parse()
 
-	// Routes are not used until request routing is implemented.
-	cfg, _, err := loadConfig(*configPath)
+	cfg, routes, err := loadConfig(*configPath)
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
+	}
+
+	handlers, err := router.Build(cfg.EntryPoints, routes.Routes)
+	if err != nil {
+		slog.Error("failed to build routers", "error", err)
 		os.Exit(1)
 	}
 
@@ -41,7 +47,7 @@ func main() {
 	// which makes every other entry point shut down too.
 	for name, ep := range cfg.EntryPoints {
 		g.Go(func() error {
-			return serve(gctx, name, ep)
+			return serve(gctx, name, ep, handlers[name])
 		})
 	}
 
@@ -72,12 +78,13 @@ func loadConfig(path string) (*config.Config, *config.RoutesConfig, error) {
 	return cfg, routes, nil
 }
 
-// serve runs an HTTP server for the named entry point until ctx is
-// cancelled, then shuts it down gracefully within shutdownTimeout.
-func serve(ctx context.Context, name string, ep config.EntryPoint) error {
+// serve runs an HTTP server for the named entry point, handling requests
+// with handler, until ctx is cancelled, then shuts it down gracefully within
+// shutdownTimeout.
+func serve(ctx context.Context, name string, ep config.EntryPoint, handler http.Handler) error {
 	srv := &http.Server{
 		Addr:              ep.Address,
-		Handler:           entryPointHandler(name),
+		Handler:           handler,
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}
@@ -101,18 +108,4 @@ func serve(ctx context.Context, name string, ep config.EntryPoint) error {
 		return fmt.Errorf("entrypoint %q: shutdown: %w", name, err)
 	}
 	return nil
-}
-
-// entryPointHandler is a placeholder until routing to backends is implemented.
-func entryPointHandler(name string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		slog.Info("request received",
-			"entrypoint", name,
-			"method", r.Method,
-			"host", r.Host,
-			"path", r.URL.Path,
-			"remote", r.RemoteAddr,
-		)
-		http.Error(w, "no route configured", http.StatusNotFound)
-	})
 }
