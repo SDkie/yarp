@@ -1,0 +1,71 @@
+// Package cache is a key/value store backed by BadgerDB.
+package cache
+
+import (
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/dgraph-io/badger/v4"
+)
+
+// dir is where the store keeps its data, relative to the working directory.
+const dir = ".cache"
+
+// Cache is a key/value store backed by BadgerDB. It is safe for concurrent
+// use.
+type Cache struct {
+	db *badger.DB
+}
+
+// Open opens the store in the .cache directory, creating it if needed. The
+// caller must call Close when done.
+func Open() (*Cache, error) {
+	opts := badger.DefaultOptions(dir)
+	db, err := badger.Open(opts)
+	if err != nil {
+		return nil, fmt.Errorf("open cache %q: %w", dir, err)
+	}
+	return &Cache{db: db}, nil
+}
+
+// Get returns the value stored under key. found is false when the key does
+// not exist or has expired; err is only set for real failures.
+func (c *Cache) Get(key string) (value []byte, found bool, err error) {
+	err = c.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(key))
+		if err != nil {
+			return err
+		}
+		value, err = item.ValueCopy(nil)
+		return err
+	})
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("cache get %q: %w", key, err)
+	}
+	return value, true, nil
+}
+
+// Set stores value under key. With ttl > 0 the entry expires after ttl;
+// with ttl == 0 it never expires.
+func (c *Cache) Set(key string, value []byte, ttl time.Duration) error {
+	err := c.db.Update(func(txn *badger.Txn) error {
+		entry := badger.NewEntry([]byte(key), value)
+		if ttl > 0 {
+			entry = entry.WithTTL(ttl)
+		}
+		return txn.SetEntry(entry)
+	})
+	if err != nil {
+		return fmt.Errorf("cache set %q: %w", key, err)
+	}
+	return nil
+}
+
+// Close flushes pending writes and releases the store.
+func (c *Cache) Close() error {
+	return c.db.Close()
+}
