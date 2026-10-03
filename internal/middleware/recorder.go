@@ -5,22 +5,34 @@ import (
 	"bytes"
 	"net"
 	"net/http"
+	"time"
 )
 
-// recorder passes the response through to the client unchanged while
-// keeping a copy of its status, headers and body.
+// recorder passes the response through to the client unchanged. It records
+// the final status, the headers as sent and when they were sent, and keeps
+// a copy of the body when shouldStore approves the response.
 type recorder struct {
 	http.ResponseWriter
-	status   int
-	header   http.Header
-	body     bytes.Buffer
-	hijacked bool
+
+	// shouldStore decides from the status and headers whether the response
+	// may be stored. When nil, the body is never copied.
+	shouldStore func(status int, header http.Header) bool
+
+	status       int
+	header       http.Header
+	responseTime time.Time
+	recording    bool
+	body         bytes.Buffer
+	hijacked     bool
 }
 
 func (rec *recorder) WriteHeader(code int) {
-	if rec.status == 0 {
+	// 1xx responses are interim; only the first final status counts.
+	if rec.status == 0 && code >= 200 {
 		rec.status = code
 		rec.header = rec.ResponseWriter.Header().Clone()
+		rec.responseTime = time.Now()
+		rec.recording = rec.shouldStore != nil && rec.shouldStore(code, rec.header)
 	}
 	rec.ResponseWriter.WriteHeader(code)
 }
@@ -30,7 +42,9 @@ func (rec *recorder) Write(b []byte) (int, error) {
 		rec.WriteHeader(http.StatusOK)
 	}
 	n, err := rec.ResponseWriter.Write(b)
-	rec.body.Write(b[:n]) // Copy exactly what the client received.
+	if rec.recording {
+		rec.body.Write(b[:n]) // Copy exactly what the client received.
+	}
 	return n, err
 }
 
@@ -50,10 +64,8 @@ func (rec *recorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return conn, brw, err
 }
 
-// storable reports whether the recorded response should be stored: a
-// response was written, the connection was not aborted (a truncated body),
-// and it is not a 502, which is what the proxy answers when the backend is
-// unreachable.
+// storable reports whether the recorded response was approved for storing
+// and arrived complete: the connection was not aborted (a truncated body).
 func (rec *recorder) storable() bool {
-	return rec.status != 0 && !rec.hijacked && rec.status != http.StatusBadGateway
+	return rec.recording && !rec.hijacked
 }

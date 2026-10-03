@@ -65,6 +65,17 @@ func (c *Cache) Set(key string, value []byte, ttl time.Duration) error {
 	return nil
 }
 
+// Delete removes key. Deleting a key that does not exist is not an error.
+func (c *Cache) Delete(key string) error {
+	err := c.db.Update(func(txn *badger.Txn) error {
+		return txn.Delete([]byte(key))
+	})
+	if err != nil {
+		return fmt.Errorf("cache delete %q: %w", key, err)
+	}
+	return nil
+}
+
 // Close flushes pending writes and releases the store.
 func (c *Cache) Close() error {
 	return c.db.Close()
