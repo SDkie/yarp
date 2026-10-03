@@ -32,6 +32,13 @@ const (
 	respPrefix = "resp:"
 )
 
+// yarp's Cache-Status entries (RFC 9211).
+const (
+	cacheStatusHit    = "yarp; hit"
+	cacheStatusMiss   = "yarp; fwd=miss"
+	cacheStatusBypass = "yarp; fwd=bypass"
+)
+
 // Record is a stored response.
 type Record struct {
 	Key    string // plain variant key
@@ -56,7 +63,7 @@ type varyRecord struct {
 // HTTPCache caches responses to GET and HEAD requests in c and replies from
 // it when a response for the same method, host, path and query, and the same
 // values of the request headers named in the response's Vary header, is
-// stored. It follows these RFC 9111 rules:
+// stored. It follows these RFC 9111 and RFC 9211 rules:
 //
 //   - Only final, complete responses are stored, never 206 or 304
 //     (sections 3, 3.3, 4.3.4). Requests with Range or conditional headers
@@ -72,16 +79,19 @@ type varyRecord struct {
 //   - Responses served from the cache carry an Age header (section 4).
 //   - A 2xx or 3xx response to an unsafe method invalidates the cached
 //     GET and HEAD responses for its URL (section 4.4).
+//   - Every response gets a Cache-Status entry: hit, miss or bypass (RFC
+//     9211).
 func HTTPCache(c *cache.Cache, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead:
 		case http.MethodOptions, http.MethodTrace:
-			next.ServeHTTP(w, r) // Safe, and never cached.
+			// Safe, and never cached.
+			next.ServeHTTP(&recorder{ResponseWriter: w, cacheStatus: cacheStatusBypass}, r)
 			return
 		default:
 			// Unsafe (or unknown) method: forward, then invalidate.
-			rec := &recorder{ResponseWriter: w}
+			rec := &recorder{ResponseWriter: w, cacheStatus: cacheStatusBypass}
 			next.ServeHTTP(rec, r)
 			if rec.status >= 200 && rec.status < 400 {
 				invalidate(c, r)
@@ -90,7 +100,7 @@ func HTTPCache(c *cache.Cache, next http.Handler) http.Handler {
 		}
 
 		if bypassesCache(r) {
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(&recorder{ResponseWriter: w, cacheStatus: cacheStatusBypass}, r)
 			return
 		}
 
@@ -108,7 +118,7 @@ func HTTPCache(c *cache.Cache, next http.Handler) http.Handler {
 
 		requestTime := time.Now()
 		var generatedAt, expiresAt time.Time
-		rec := &recorder{ResponseWriter: w}
+		rec := &recorder{ResponseWriter: w, cacheStatus: cacheStatusMiss}
 		// shouldStore runs once, when the headers arrive; h is the
 		// recorder's copy of them, which is what gets stored.
 		rec.shouldStore = func(status int, h http.Header) bool {
@@ -315,6 +325,7 @@ func store(c *cache.Cache, key string, v any, ttl time.Duration) bool {
 
 func writeEntry(w http.ResponseWriter, r *http.Request, e *Record) {
 	maps.Copy(w.Header(), e.Header)
+	w.Header().Add("Cache-Status", cacheStatusHit)
 	// Age must not be negative (RFC 9111 section 5.1), even if the clock
 	// has been set back since the response was stored.
 	age := max(0, time.Since(e.GeneratedAt))

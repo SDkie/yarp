@@ -18,6 +18,10 @@ type recorder struct {
 	// may be stored. When nil, the body is never copied.
 	shouldStore func(status int, header http.Header) bool
 
+	// cacheStatus, when set, is appended to the response's Cache-Status
+	// header as the headers are sent, after any entries from the backend.
+	cacheStatus string
+
 	status       int
 	header       http.Header
 	responseTime time.Time
@@ -33,6 +37,9 @@ func (rec *recorder) WriteHeader(code int) {
 		rec.header = rec.ResponseWriter.Header().Clone()
 		rec.responseTime = time.Now()
 		rec.recording = rec.shouldStore != nil && rec.shouldStore(code, rec.header)
+		if rec.cacheStatus != "" {
+			rec.ResponseWriter.Header().Add("Cache-Status", rec.cacheStatus)
+		}
 	}
 	rec.ResponseWriter.WriteHeader(code)
 }
