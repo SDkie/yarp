@@ -39,10 +39,11 @@ type Record struct {
 	Header http.Header
 	Body   []byte
 
-	// When yarp sent the request and received the response headers; used
-	// to compute the Age header (RFC 9111 section 4.2.3).
-	RequestTime  time.Time
-	ResponseTime time.Time
+	// When the backend generated the response, as best yarp can tell, and
+	// when it becomes stale (see getFreshness). The Age header of a hit is
+	// the time since GeneratedAt.
+	GeneratedAt time.Time
+	ExpiresAt   time.Time
 }
 
 // varyRecord holds the Vary header names of the responses stored for a URL.
@@ -63,11 +64,14 @@ type varyRecord struct {
 //   - Cache-Control no-store and private responses are never stored
 //     (sections 3, 5.2.2), nor responses to requests with Authorization
 //     unless public, s-maxage or must-revalidate allows it (section 3.5).
+//   - Only fresh responses are served (sections 4, 4.2). Freshness comes
+//     from s-maxage, max-age or Expires; responses without it, and no-cache
+//     responses, are not stored, as yarp has no heuristic freshness or
+//     validation yet. Stale responses are fetched again, never served, and
+//     stored responses expire from c once stale.
 //   - Responses served from the cache carry an Age header (section 4).
 //   - A 2xx or 3xx response to an unsafe method invalidates the cached
 //     GET and HEAD responses for its URL (section 4.4).
-//
-// Stored responses never expire yet: freshness is not implemented.
 func HTTPCache(c *cache.Cache, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -95,34 +99,59 @@ func HTTPCache(c *cache.Cache, next http.Handler) http.Handler {
 		if load(c, varyKey, &vary) && vary.Key == varyPlain {
 			respKey, respPlain := getRespKey(r, vary.Names)
 			var e Record
-			if load(c, respKey, &e) && e.Key == respPlain {
+			// A stale response is fetched again: yarp cannot validate it yet.
+			if load(c, respKey, &e) && e.Key == respPlain && time.Now().Before(e.ExpiresAt) {
 				writeEntry(w, r, &e)
 				return
 			}
 		}
 
 		requestTime := time.Now()
-		rec := &recorder{
-			ResponseWriter: w,
-			shouldStore:    func(status int, h http.Header) bool { return isStorable(r, status, h) },
+		var generatedAt, expiresAt time.Time
+		rec := &recorder{ResponseWriter: w}
+		// shouldStore runs once, when the headers arrive; h is the
+		// recorder's copy of them, which is what gets stored.
+		rec.shouldStore = func(status int, h http.Header) bool {
+			cc := parseCacheControl(h)
+			if !isStorable(r, status, h, cc) {
+				return false
+			}
+			// A stored response must carry a valid Date (RFC 9110 section
+			// 6.6.1): without one, hits would be sent with the time they are
+			// served, and with an invalid one, hits would replay it. Either
+			// is replaced by the time the response was received.
+			if _, err := http.ParseTime(h.Get("Date")); err != nil {
+				h.Set("Date", rec.responseTime.UTC().Format(http.TimeFormat))
+			}
+			generatedAt, expiresAt = getFreshness(h, cc, requestTime, rec.responseTime)
+			// Only responses still fresh on arrival can ever be served.
+			return expiresAt.After(rec.responseTime)
 		}
 		next.ServeHTTP(rec, r)
 		if !rec.storable() {
 			return
 		}
 		names, _ := getVaryNames(rec.header) // Vary: * was rejected by isStorable.
-		// The response first, so the Vary record never points to nothing.
 		respKey, respPlain := getRespKey(r, names)
 		e := &Record{
-			Key:          respPlain,
-			Status:       rec.status,
-			Header:       rec.header,
-			Body:         rec.body.Bytes(),
-			RequestTime:  requestTime,
-			ResponseTime: rec.responseTime,
+			Key:         respPlain,
+			Status:      rec.status,
+			Header:      rec.header,
+			Body:        rec.body.Bytes(),
+			GeneratedAt: generatedAt,
+			ExpiresAt:   expiresAt,
 		}
-		if store(c, respKey, e) {
-			store(c, varyKey, &varyRecord{Key: varyPlain, Names: names})
+		ttl := time.Until(expiresAt)
+		if ttl <= 0 {
+			return
+		}
+		// Both records expire from the store once the response is stale. The
+		// store counts expiry in whole seconds, so round up: rounding down
+		// could drop a fresh response early. Hits still check ExpiresAt.
+		ttl = ttl.Truncate(time.Second) + time.Second
+		// The response first, so the Vary record never points to nothing.
+		if store(c, respKey, e, ttl) {
+			store(c, varyKey, &varyRecord{Key: varyPlain, Names: names}, ttl)
 		}
 	})
 }
@@ -139,14 +168,14 @@ func bypassesCache(r *http.Request) bool {
 	return false
 }
 
-// isStorable reports whether the response to r with status and header may
-// be stored.
-func isStorable(r *http.Request, status int, header http.Header) bool {
+// isStorable reports whether the response to r with status, header and its
+// parsed Cache-Control cc may be stored.
+func isStorable(r *http.Request, status int, header http.Header, cc cacheControl) bool {
 	switch {
 	case status == http.StatusPartialContent, status == http.StatusNotModified:
 		return false // Partial or body-less: never a complete response.
 	case status >= 500:
-		return false // Not heuristically cacheable, and no freshness yet.
+		return false // Server errors are never cached.
 	}
 	if _, ok := getVaryNames(header); !ok {
 		return false // Vary: * never matches a later request.
@@ -154,9 +183,11 @@ func isStorable(r *http.Request, status int, header http.Header) bool {
 	if ct, _, _ := strings.Cut(header.Get("Content-Type"), ";"); strings.TrimSpace(ct) == "text/event-stream" {
 		return false // An endless stream would be copied forever.
 	}
-	cc := parseCacheControl(header)
 	if cc.has("no-store") || cc.has("private") {
 		return false
+	}
+	if cc.has("no-cache") {
+		return false // Must be validated before each use (section 5.2.2.4).
 	}
 	if r.Header.Get("Authorization") != "" {
 		return cc.has("public") || cc.has("s-maxage") || cc.has("must-revalidate")
@@ -266,16 +297,16 @@ func load(c *cache.Cache, key string, v any) bool {
 	return true
 }
 
-// store saves v under key without expiry and reports whether it was saved.
+// store saves v under key until ttl passes and reports whether it was saved.
 // Failures are logged; the response has already been sent, so they never
 // affect the client.
-func store(c *cache.Cache, key string, v any) bool {
+func store(c *cache.Cache, key string, v any, ttl time.Duration) bool {
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(v); err != nil {
 		slog.Error("cache encode failed", "key", key, "error", err)
 		return false
 	}
-	if err := c.Set(key, buf.Bytes(), 0); err != nil {
+	if err := c.Set(key, buf.Bytes(), ttl); err != nil {
 		slog.Error("cache write failed", "key", key, "error", err)
 		return false
 	}
@@ -284,28 +315,12 @@ func store(c *cache.Cache, key string, v any) bool {
 
 func writeEntry(w http.ResponseWriter, r *http.Request, e *Record) {
 	maps.Copy(w.Header(), e.Header)
-	w.Header().Set("Age", strconv.FormatInt(int64(currentAge(e, time.Now())/time.Second), 10))
+	// Age must not be negative (RFC 9111 section 5.1), even if the clock
+	// has been set back since the response was stored.
+	age := max(0, time.Since(e.GeneratedAt))
+	w.Header().Set("Age", strconv.FormatInt(int64(age/time.Second), 10))
 	w.WriteHeader(e.Status)
 	if r.Method != http.MethodHead {
 		w.Write(e.Body)
 	}
-}
-
-// currentAge returns how long ago the backend generated e, including time
-// spent in caches before yarp (RFC 9111 section 4.2.3).
-func currentAge(e *Record, now time.Time) time.Duration {
-	apparentAge := time.Duration(0)
-	if date, err := http.ParseTime(e.Header.Get("Date")); err == nil {
-		apparentAge = max(0, e.ResponseTime.Sub(date))
-	}
-	ageValue := time.Duration(0)
-	// A list-valued Age uses its first member; an invalid one is ignored
-	// (section 5.1).
-	first, _, _ := strings.Cut(e.Header.Get("Age"), ",")
-	if secs, err := strconv.ParseInt(strings.TrimSpace(first), 10, 64); err == nil && secs >= 0 {
-		ageValue = time.Duration(secs) * time.Second
-	}
-	responseDelay := e.ResponseTime.Sub(e.RequestTime)
-	correctedInitialAge := max(apparentAge, ageValue+responseDelay)
-	return correctedInitialAge + now.Sub(e.ResponseTime)
 }
