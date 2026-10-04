@@ -35,11 +35,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	c, err := cache.Open()
-	if err != nil {
-		slog.Error("failed to open cache", "error", err)
-		os.Exit(1)
+	// c stays nil when the cache is disabled.
+	var c *cache.Cache
+	if cfg.Cache.Enabled {
+		c, err = cache.Open()
+		if err != nil {
+			slog.Error("failed to open cache", "error", err)
+			os.Exit(1)
+		}
 	}
+	slog.Info("cache configured", "enabled", cfg.Cache.Enabled)
 
 	handlers, err := router.Build(cfg.EntryPoints, routes.Routes, c)
 	if err != nil {
@@ -72,6 +77,9 @@ func main() {
 // closeCache flushes and closes the cache. It is called explicitly rather
 // than deferred, because os.Exit skips deferred calls.
 func closeCache(c *cache.Cache) {
+	if c == nil {
+		return
+	}
 	if err := c.Close(); err != nil {
 		slog.Error("failed to close cache", "error", err)
 	}

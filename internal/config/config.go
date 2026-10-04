@@ -16,6 +16,7 @@ import (
 type Config struct {
 	EntryPoints map[string]EntryPoint `yaml:"entryPoints"`
 	Providers   Providers             `yaml:"providers"`
+	Cache       Cache                 `yaml:"cache"`
 }
 
 // EntryPoint is a named network address yarp listens on.
@@ -27,6 +28,12 @@ type EntryPoint struct {
 // At least one provider must be configured.
 type Providers struct {
 	File *FileProvider `yaml:"file"`
+}
+
+// Cache configures the HTTP response cache.
+type Cache struct {
+	// Enabled turns the cache on for every route. It defaults to true.
+	Enabled bool `yaml:"enabled"`
 }
 
 // FileProvider loads the routing configuration from a file.
@@ -46,7 +53,7 @@ func Load(path string) (*Config, error) {
 // Parse decodes YAML config data and validates it. Unknown fields and
 // duplicate keys are rejected.
 func Parse(data []byte) (*Config, error) {
-	var cfg Config
+	cfg := Config{Cache: Cache{Enabled: true}} // defaults for omitted fields
 	if err := decodeStrict(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}

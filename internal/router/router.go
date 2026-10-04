@@ -38,7 +38,8 @@ type route struct {
 // that entry point. Entry points without routes answer 404 to every request.
 // It fails if two routes on the same entry point have the same host and
 // pathPrefix, since only one of them could ever match. All routes share one
-// backend transport, so they reuse the same connection pool.
+// backend transport, so they reuse the same connection pool. Responses are
+// cached in c; a nil c disables caching.
 func Build(entryPoints map[string]config.EntryPoint, routes map[string]config.Route, c *cache.Cache) (map[string]http.Handler, error) {
 	transport := newTransport()
 	byEntryPoint := make(map[string][]route, len(entryPoints))
@@ -48,11 +49,15 @@ func Build(entryPoints map[string]config.EntryPoint, routes map[string]config.Ro
 		if err != nil {
 			return nil, err
 		}
+		var handler http.Handler = proxy
+		if c != nil {
+			handler = middleware.HTTPCache(c, proxy)
+		}
 		rt := route{
 			name:       name,
 			host:       normalizeHost(r.Host),
 			pathPrefix: cmp.Or(r.PathPrefix, "/"),
-			handler:    middleware.HTTPCache(c, proxy),
+			handler:    handler,
 		}
 		for _, ep := range r.EntryPoints {
 			byEntryPoint[ep] = append(byEntryPoint[ep], rt)
