@@ -71,8 +71,9 @@ type varyRecord struct {
 //   - A hit answers the client's If-None-Match or If-Modified-Since with 304
 //     when the stored 200 matches (section 4.3.2).
 //   - Cache-Control no-store and private responses are never stored
-//     (sections 3, 5.2.2), nor responses to requests with Authorization
-//     unless public, s-maxage or must-revalidate allows it (section 3.5).
+//     (sections 3, 5.2.2), nor responses with Set-Cookie (section 7.3), nor
+//     responses to requests with Authorization unless public, s-maxage or
+//     must-revalidate allows it (section 3.5).
 //   - Only fresh responses are served (sections 4, 4.2). Freshness comes
 //     from s-maxage, max-age or Expires; responses without it, and no-cache
 //     responses, are not stored, as yarp has no heuristic freshness or
@@ -210,6 +211,9 @@ func isStorable(r *http.Request, status int, header http.Header, cc cacheControl
 	}
 	if cc.has("no-cache") {
 		return false // Must be validated before each use (section 5.2.2.4).
+	}
+	if len(header.Values("Set-Cookie")) > 0 {
+		return false // A user's cookie must not reach others (section 7.3).
 	}
 	if r.Header.Get("Authorization") != "" {
 		return cc.has("public") || cc.has("s-maxage") || cc.has("must-revalidate")
