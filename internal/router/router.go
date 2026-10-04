@@ -15,6 +15,7 @@ import (
 	"github.com/SDkie/yarp/internal/cache"
 	"github.com/SDkie/yarp/internal/config"
 	"github.com/SDkie/yarp/internal/middleware"
+	"github.com/SDkie/yarp/internal/telemetry"
 )
 
 // Router is the http.Handler for one entry point. It sends each request to
@@ -103,15 +104,19 @@ func hostRank(host string) int {
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	routeName := ""
+	sw := &statusWriter{ResponseWriter: w}
+	end := telemetry.StartRequest(r.Context(), r.Method, rt.entryPoint)
+	// Deferred, so the request is ended even if a handler panics.
+	defer func() { end(sw.status, routeName) }()
 
 	host := requestHost(r)
 	if i := slices.IndexFunc(rt.routes, func(route route) bool {
 		return route.matchHost(host) && route.matchPath(r.URL.Path)
 	}); i >= 0 {
 		routeName = rt.routes[i].name
-		rt.routes[i].handler.ServeHTTP(w, r)
+		rt.routes[i].handler.ServeHTTP(sw, r)
 	} else {
-		http.Error(w, "no matching route", http.StatusNotFound)
+		http.Error(sw, "no matching route", http.StatusNotFound)
 	}
 
 	slog.Info("request",

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/SDkie/yarp/internal/cache"
+	"github.com/SDkie/yarp/internal/telemetry"
 )
 
 // Responses are stored in two steps, because which request headers select a
@@ -37,6 +38,13 @@ const (
 	cacheStatusHit    = "yarp; hit"
 	cacheStatusMiss   = "yarp; fwd=miss"
 	cacheStatusBypass = "yarp; fwd=bypass"
+)
+
+// Cache results, as counted in the yarp.cache.requests metric.
+const (
+	cacheResultHit    = "hit"
+	cacheResultMiss   = "miss"
+	cacheResultBypass = "bypass"
 )
 
 // Record is a stored response.
@@ -90,10 +98,12 @@ func HTTPCache(c *cache.Cache, next http.Handler) http.Handler {
 		case http.MethodGet, http.MethodHead:
 		case http.MethodOptions, http.MethodTrace:
 			// Safe, and never cached.
+			telemetry.RecordCacheResult(r.Context(), cacheResultBypass)
 			next.ServeHTTP(&recorder{ResponseWriter: w, cacheStatus: cacheStatusBypass}, r)
 			return
 		default:
 			// Unsafe (or unknown) method: forward, then invalidate.
+			telemetry.RecordCacheResult(r.Context(), cacheResultBypass)
 			rec := &recorder{ResponseWriter: w, cacheStatus: cacheStatusBypass}
 			next.ServeHTTP(rec, r)
 			if rec.status >= 200 && rec.status < 400 {
@@ -103,6 +113,7 @@ func HTTPCache(c *cache.Cache, next http.Handler) http.Handler {
 		}
 
 		if bypassesCache(r) {
+			telemetry.RecordCacheResult(r.Context(), cacheResultBypass)
 			next.ServeHTTP(&recorder{ResponseWriter: w, cacheStatus: cacheStatusBypass}, r)
 			return
 		}
@@ -114,6 +125,7 @@ func HTTPCache(c *cache.Cache, next http.Handler) http.Handler {
 			var e Record
 			// A stale response is fetched again: yarp cannot validate it yet.
 			if load(c, respKey, &e) && e.Key == respPlain && time.Now().Before(e.ExpiresAt) {
+				telemetry.RecordCacheResult(r.Context(), cacheResultHit)
 				if isNotModified(r, &e) {
 					writeNotModified(w, &e)
 				} else {
@@ -123,6 +135,7 @@ func HTTPCache(c *cache.Cache, next http.Handler) http.Handler {
 			}
 		}
 
+		telemetry.RecordCacheResult(r.Context(), cacheResultMiss)
 		requestTime := time.Now()
 		var generatedAt, expiresAt time.Time
 		rec := &recorder{ResponseWriter: w, cacheStatus: cacheStatusMiss}

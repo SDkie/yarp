@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/SDkie/yarp/internal/config"
+	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -25,9 +27,10 @@ import (
 )
 
 const (
-	serviceName = "yarp"
-	scopeName   = "github.com/SDkie/yarp"
-	stopTimeout = 5 * time.Second
+	serviceName    = "yarp"
+	scopeName      = "github.com/SDkie/yarp"
+	stopTimeout    = 5 * time.Second
+	metricInterval = 15 * time.Second
 )
 
 // Setup starts OpenTelemetry for this version of yarp and also sends the
@@ -58,6 +61,9 @@ func Setup(cfg *config.Otel, version string, level slog.Leveler) (stop func(), e
 
 	otel.SetTracerProvider(tracerProvider)
 	otel.SetMeterProvider(meterProvider)
+	if err := otelruntime.Start(otelruntime.WithMeterProvider(meterProvider)); err != nil {
+		return nil, fmt.Errorf("start runtime metrics: %w", err)
+	}
 	otel.SetLoggerProvider(loggerProvider)
 
 	// Trace IDs travel in the traceparent header.
@@ -131,7 +137,7 @@ func newMeterProvider(ctx context.Context, endpoint string, res *resource.Resour
 	}
 	return sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter)),
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter, getMetricReaderOptions()...)),
 	), nil
 }
 
@@ -147,6 +153,15 @@ func newLoggerProvider(ctx context.Context, endpoint string, res *resource.Resou
 		sdklog.WithResource(res),
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(exporter)),
 	), nil
+}
+
+// getMetricReaderOptions exports metrics every metricInterval unless
+// OTEL_METRIC_EXPORT_INTERVAL is set.
+func getMetricReaderOptions() []sdkmetric.PeriodicReaderOption {
+	if os.Getenv("OTEL_METRIC_EXPORT_INTERVAL") != "" {
+		return nil
+	}
+	return []sdkmetric.PeriodicReaderOption{sdkmetric.WithInterval(metricInterval)}
 }
 
 // getSignalURL returns endpoint plus "/v1/<signal>".

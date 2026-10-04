@@ -15,7 +15,9 @@ yarp (Yet Another Reverse Proxy) is a small HTTP reverse proxy written in Go. It
   - never stores `no-store`, `private`, `no-cache` or `Set-Cookie` responses;
   - clears a URL's cached responses after a successful `POST`, `PUT`, `DELETE` or other unsafe request;
   - adds a `Cache-Status` header (`hit`, `fwd=miss` or `fwd=bypass`) to every response.
-- **OpenTelemetry:** when configured, yarp's logs are also sent to a collector over OTLP/HTTP, at the same level as the console. Traces and metrics are added next.
+- **OpenTelemetry:** when configured, yarp sends to a collector over OTLP/HTTP:
+  - its logs, at the same level as the console;
+  - metrics every 15 s: request duration and active requests (`http.server.*`), backend call duration (`http.client.request.duration`), cache hits, misses and bypasses (`yarp.cache.requests`) and Go runtime metrics (`go.*`).
 - **Logging:** structured logs on stderr, with a configurable level (`ERROR` by default).
 - **Strict config:** unknown fields and invalid values are rejected at startup.
 - **Graceful shutdown** on `SIGINT` / `SIGTERM`.
