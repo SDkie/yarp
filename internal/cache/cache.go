@@ -21,7 +21,7 @@ type Cache struct {
 // Open opens the store in the .cache directory, creating it if needed. The
 // caller must call Close when done.
 func Open() (*Cache, error) {
-	opts := badger.DefaultOptions(dir)
+	opts := badger.DefaultOptions(dir).WithLogger(badgerLogger{})
 	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("open cache %q: %w", dir, err)
