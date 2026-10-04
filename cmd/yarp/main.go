@@ -45,7 +45,7 @@ func main() {
 	slog.Info("config loaded", "path", *configPath, "entryPoints", len(cfg.EntryPoints),
 		"routesPath", cfg.Providers.File.Filename, "routes", len(routes.Routes))
 
-	stopTelemetry, err := telemetry.Setup(cfg.Otel, version)
+	stopTelemetry, err := telemetry.Setup(cfg.Otel, version, logLevel)
 	if err != nil {
 		slog.Error("failed to set up OpenTelemetry", "error", err)
 		os.Exit(1)
@@ -85,12 +85,15 @@ func main() {
 	err = g.Wait()
 	stop()
 	closeCache(c)
-	stopTelemetry()
 	if err != nil {
 		slog.Error("yarp exited with error", "error", err)
+	} else {
+		slog.Info("yarp stopped")
+	}
+	stopTelemetry() // last, so the lines above are exported too
+	if err != nil {
 		os.Exit(1)
 	}
-	slog.Info("yarp stopped")
 }
 
 // closeCache flushes and closes the cache. It is called explicitly rather

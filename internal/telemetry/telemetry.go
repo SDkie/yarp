@@ -26,12 +26,14 @@ import (
 
 const (
 	serviceName = "yarp"
+	scopeName   = "github.com/SDkie/yarp"
 	stopTimeout = 5 * time.Second
 )
 
-// Setup starts OpenTelemetry for this version of yarp; stop flushes and
-// shuts it down. A nil cfg leaves it off.
-func Setup(cfg *config.Otel, version string) (stop func(), err error) {
+// Setup starts OpenTelemetry for this version of yarp and also sends the
+// default logger's records at or above level to it; stop flushes and shuts
+// it down. A nil cfg leaves it off.
+func Setup(cfg *config.Otel, version string, level slog.Leveler) (stop func(), err error) {
 	if cfg == nil {
 		return func() {}, nil
 	}
@@ -62,13 +64,21 @@ func Setup(cfg *config.Otel, version string) (stop func(), err error) {
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{}, propagation.Baggage{}))
 
+	// OpenTelemetry's own errors go to the console only, so a failed log
+	// export is not exported again.
+	console := slog.Default()
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
-		slog.Error("opentelemetry error", "error", err)
+		console.Error("opentelemetry error", "error", err)
 	}))
 
+	slog.SetDefault(slog.New(slog.NewMultiHandler(
+		console.Handler(),
+		newLogHandler(loggerProvider, level),
+	)))
 	slog.Info("opentelemetry configured", "endpoint", cfg.Endpoint)
 
 	stop = func() {
+		slog.SetDefault(console)
 		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
 		defer cancel()
 		err := errors.Join(
@@ -77,7 +87,7 @@ func Setup(cfg *config.Otel, version string) (stop func(), err error) {
 			loggerProvider.Shutdown(ctx),
 		)
 		if err != nil {
-			slog.Error("failed to stop OpenTelemetry", "error", err)
+			console.Error("failed to stop OpenTelemetry", "error", err)
 		}
 	}
 	return stop, nil
