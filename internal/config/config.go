@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -17,6 +18,8 @@ type Config struct {
 	EntryPoints map[string]EntryPoint `yaml:"entryPoints"`
 	Providers   Providers             `yaml:"providers"`
 	Cache       Cache                 `yaml:"cache"`
+	// Otel is nil when OpenTelemetry is not configured.
+	Otel *Otel `yaml:"otel"`
 }
 
 // EntryPoint is a named network address yarp listens on.
@@ -34,6 +37,13 @@ type Providers struct {
 type Cache struct {
 	// Enabled turns the cache on for every route. It defaults to true.
 	Enabled bool `yaml:"enabled"`
+}
+
+// Otel configures sending telemetry to an OpenTelemetry collector. Other
+// settings come from the standard OTEL_* environment variables.
+type Otel struct {
+	// Endpoint is the collector's OTLP/HTTP base URL, e.g. "http://localhost:4318".
+	Endpoint string `yaml:"endpoint"`
 }
 
 // FileProvider loads the routing configuration from a file.
@@ -86,6 +96,16 @@ func (c *Config) validate() error {
 	}
 	if c.Providers.File.Filename == "" {
 		return errors.New("providers.file.filename is required")
+	}
+
+	if c.Otel != nil {
+		if c.Otel.Endpoint == "" {
+			return errors.New("otel.endpoint is required")
+		}
+		u, err := url.Parse(c.Otel.Endpoint)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("otel.endpoint %q is invalid, expected an http or https URL such as http://localhost:4318", c.Otel.Endpoint)
+		}
 	}
 	return nil
 }

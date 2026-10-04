@@ -14,6 +14,7 @@ import (
 	"github.com/SDkie/yarp/internal/cache"
 	"github.com/SDkie/yarp/internal/config"
 	"github.com/SDkie/yarp/internal/router"
+	"github.com/SDkie/yarp/internal/telemetry"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -22,6 +23,10 @@ const (
 	readHeaderTimeout = 10 * time.Second
 	idleTimeout       = 180 * time.Second
 )
+
+// version is yarp's version; release builds can set it with
+// -ldflags "-X main.version=...".
+var version = "0.1.0"
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -35,12 +40,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	stopTelemetry, err := telemetry.Setup(cfg.Otel, version)
+	if err != nil {
+		slog.Error("failed to set up OpenTelemetry", "error", err)
+		os.Exit(1)
+	}
+
 	// c stays nil when the cache is disabled.
 	var c *cache.Cache
 	if cfg.Cache.Enabled {
 		c, err = cache.Open()
 		if err != nil {
 			slog.Error("failed to open cache", "error", err)
+			stopTelemetry()
 			os.Exit(1)
 		}
 	}
@@ -50,6 +62,7 @@ func main() {
 	if err != nil {
 		slog.Error("failed to build routers", "error", err)
 		closeCache(c)
+		stopTelemetry()
 		os.Exit(1)
 	}
 
@@ -67,6 +80,7 @@ func main() {
 	err = g.Wait()
 	stop()
 	closeCache(c)
+	stopTelemetry()
 	if err != nil {
 		slog.Error("yarp exited with error", "error", err)
 		os.Exit(1)
