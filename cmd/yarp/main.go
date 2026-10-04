@@ -29,7 +29,8 @@ const (
 var version = "0.1.0"
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	logLevel := new(slog.LevelVar)
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
 
 	configPath := flag.String("config", "yarp.yml", "path to the config file")
 	flag.Parse()
@@ -39,6 +40,10 @@ func main() {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+	level, _ := cfg.Log.GetLevel() // validated by loadConfig
+	logLevel.Set(level)
+	slog.Info("config loaded", "path", *configPath, "entryPoints", len(cfg.EntryPoints),
+		"routesPath", cfg.Providers.File.Filename, "routes", len(routes.Routes))
 
 	stopTelemetry, err := telemetry.Setup(cfg.Otel, version)
 	if err != nil {
@@ -106,14 +111,10 @@ func loadConfig(path string) (*config.Config, *config.RoutesConfig, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	slog.Info("config loaded", "path", path, "entryPoints", len(cfg.EntryPoints))
-
-	fp := cfg.Providers.File
-	routes, err := config.LoadRoutes(fp.Filename, cfg.EntryPoints)
+	routes, err := config.LoadRoutes(cfg.Providers.File.Filename, cfg.EntryPoints)
 	if err != nil {
 		return nil, nil, fmt.Errorf("file provider: %w", err)
 	}
-	slog.Info("routes loaded", "provider", "file", "path", fp.Filename, "routes", len(routes.Routes))
 	return cfg, routes, nil
 }
 

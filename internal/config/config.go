@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,6 +20,7 @@ type Config struct {
 	EntryPoints map[string]EntryPoint `yaml:"entryPoints"`
 	Providers   Providers             `yaml:"providers"`
 	Cache       Cache                 `yaml:"cache"`
+	Log         Log                   `yaml:"log"`
 	// Otel is nil when OpenTelemetry is not configured.
 	Otel *Otel `yaml:"otel"`
 }
@@ -37,6 +40,27 @@ type Providers struct {
 type Cache struct {
 	// Enabled turns the cache on for every route. It defaults to true.
 	Enabled bool `yaml:"enabled"`
+}
+
+// Log configures yarp's logs.
+type Log struct {
+	// Level is DEBUG, INFO, WARN or ERROR, in any case. It defaults to ERROR.
+	Level string `yaml:"level"`
+}
+
+// GetLevel returns the slog level named by l.Level.
+func (l Log) GetLevel() (slog.Level, error) {
+	switch strings.ToUpper(l.Level) {
+	case "DEBUG":
+		return slog.LevelDebug, nil
+	case "INFO":
+		return slog.LevelInfo, nil
+	case "WARN":
+		return slog.LevelWarn, nil
+	case "ERROR":
+		return slog.LevelError, nil
+	}
+	return 0, fmt.Errorf("log.level %q is invalid, expected DEBUG, INFO, WARN or ERROR", l.Level)
 }
 
 // Otel configures sending telemetry to an OpenTelemetry collector. Other
@@ -63,7 +87,11 @@ func Load(path string) (*Config, error) {
 // Parse decodes YAML config data and validates it. Unknown fields and
 // duplicate keys are rejected.
 func Parse(data []byte) (*Config, error) {
-	cfg := Config{Cache: Cache{Enabled: true}} // defaults for omitted fields
+	// Defaults for omitted fields.
+	cfg := Config{
+		Cache: Cache{Enabled: true},
+		Log:   Log{Level: "ERROR"},
+	}
 	if err := decodeStrict(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
@@ -96,6 +124,10 @@ func (c *Config) validate() error {
 	}
 	if c.Providers.File.Filename == "" {
 		return errors.New("providers.file.filename is required")
+	}
+
+	if _, err := c.Log.GetLevel(); err != nil {
+		return err
 	}
 
 	if c.Otel != nil {
