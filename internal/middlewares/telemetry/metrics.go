@@ -14,15 +14,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// CacheResult is how the cache handled a request.
-type CacheResult int
-
-const (
-	CacheHit CacheResult = iota
-	CacheMiss
-	CacheBypass
-)
-
 var (
 	meter = otel.Meter(scopeName)
 
@@ -30,14 +21,6 @@ var (
 	serverActive   httpconv.ServerActiveRequests
 	clientDuration httpconv.ClientRequestDuration
 	cacheRequests  metric.Int64Counter
-
-	// Built once, so counting a cache result allocates nothing.
-	cacheResultAttrs = [...]attribute.KeyValue{
-		CacheHit:    attribute.String("yarp.cache.result", "hit"),
-		CacheMiss:   attribute.String("yarp.cache.result", "miss"),
-		CacheBypass: attribute.String("yarp.cache.result", "bypass"),
-	}
-	cacheResultOpts [len(cacheResultAttrs)]metric.AddOption
 )
 
 // init creates the instruments. They use the global meter provider, so they
@@ -53,19 +36,18 @@ func init() {
 	if err := errors.Join(errs[:]...); err != nil {
 		panic(err)
 	}
-	for i, attr := range cacheResultAttrs {
-		cacheResultOpts[i] = metric.WithAttributeSet(attribute.NewSet(attr))
-	}
 }
 
-// RecordCacheResult counts a request by its cache result and adds the
-// result to the request's span. It does nothing when telemetry is off.
-func (t *Telemetry) RecordCacheResult(ctx context.Context, result CacheResult) {
+// RecordCacheResult counts a request by its cache result, such as "hit",
+// and adds the result to the request's span. It does nothing when telemetry
+// is off.
+func (t *Telemetry) RecordCacheResult(ctx context.Context, result string) {
 	if t == nil {
 		return
 	}
-	cacheRequests.Add(ctx, 1, cacheResultOpts[result])
-	trace.SpanFromContext(ctx).SetAttributes(cacheResultAttrs[result])
+	attr := attribute.String("yarp.cache.result", result)
+	cacheRequests.Add(ctx, 1, metric.WithAttributes(attr))
+	trace.SpanFromContext(ctx).SetAttributes(attr)
 }
 
 // getMethodAttr returns method, or "_OTHER" for a non-standard one, which

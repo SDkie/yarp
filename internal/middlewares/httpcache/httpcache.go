@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/SDkie/yarp/internal/cache"
-	"github.com/SDkie/yarp/internal/telemetry"
+	"github.com/SDkie/yarp/internal/middlewares/telemetry"
 )
 
 // Responses are stored in two steps, because which request headers select a
@@ -41,6 +41,13 @@ const (
 	cacheStatusHit    = "yarp; hit"
 	cacheStatusMiss   = "yarp; fwd=miss"
 	cacheStatusBypass = "yarp; fwd=bypass"
+)
+
+// Cache results, as counted in the yarp.cache.requests metric.
+const (
+	cacheResultHit    = "hit"
+	cacheResultMiss   = "miss"
+	cacheResultBypass = "bypass"
 )
 
 // Record is a stored response.
@@ -97,12 +104,12 @@ func New(c *cache.Cache, tel *telemetry.Telemetry, next http.Handler) http.Handl
 		case http.MethodGet, http.MethodHead:
 		case http.MethodOptions, http.MethodTrace:
 			// Safe, and never cached.
-			tel.RecordCacheResult(r.Context(), telemetry.CacheBypass)
+			tel.RecordCacheResult(r.Context(), cacheResultBypass)
 			next.ServeHTTP(&recorder{ResponseWriter: w, cacheStatus: cacheStatusBypass}, r)
 			return
 		default:
 			// Unsafe (or unknown) method: forward, then invalidate.
-			tel.RecordCacheResult(r.Context(), telemetry.CacheBypass)
+			tel.RecordCacheResult(r.Context(), cacheResultBypass)
 			rec := &recorder{ResponseWriter: w, cacheStatus: cacheStatusBypass}
 			next.ServeHTTP(rec, r)
 			if rec.status >= 200 && rec.status < 400 {
@@ -112,7 +119,7 @@ func New(c *cache.Cache, tel *telemetry.Telemetry, next http.Handler) http.Handl
 		}
 
 		if bypassesCache(r) {
-			tel.RecordCacheResult(r.Context(), telemetry.CacheBypass)
+			tel.RecordCacheResult(r.Context(), cacheResultBypass)
 			next.ServeHTTP(&recorder{ResponseWriter: w, cacheStatus: cacheStatusBypass}, r)
 			return
 		}
@@ -124,7 +131,7 @@ func New(c *cache.Cache, tel *telemetry.Telemetry, next http.Handler) http.Handl
 			var e Record
 			// A stale response is fetched again: yarp cannot validate it yet.
 			if load(r.Context(), c, respKey, &e) && e.Key == respPlain && time.Now().Before(e.ExpiresAt) {
-				tel.RecordCacheResult(r.Context(), telemetry.CacheHit)
+				tel.RecordCacheResult(r.Context(), cacheResultHit)
 				if isNotModified(r, &e) {
 					writeNotModified(w, &e)
 				} else {
@@ -134,7 +141,7 @@ func New(c *cache.Cache, tel *telemetry.Telemetry, next http.Handler) http.Handl
 			}
 		}
 
-		tel.RecordCacheResult(r.Context(), telemetry.CacheMiss)
+		tel.RecordCacheResult(r.Context(), cacheResultMiss)
 		requestTime := time.Now()
 		var generatedAt, expiresAt time.Time
 		rec := &recorder{ResponseWriter: w, cacheStatus: cacheStatusMiss}

@@ -13,8 +13,8 @@ import (
 
 	"github.com/SDkie/yarp/internal/cache"
 	"github.com/SDkie/yarp/internal/config"
+	"github.com/SDkie/yarp/internal/middlewares/telemetry"
 	"github.com/SDkie/yarp/internal/router"
-	"github.com/SDkie/yarp/internal/telemetry"
 	"golang.org/x/sync/errgroup"
 )
 

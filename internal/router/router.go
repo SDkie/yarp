@@ -15,7 +15,7 @@ import (
 	"github.com/SDkie/yarp/internal/cache"
 	"github.com/SDkie/yarp/internal/config"
 	"github.com/SDkie/yarp/internal/middlewares/httpcache"
-	"github.com/SDkie/yarp/internal/telemetry"
+	"github.com/SDkie/yarp/internal/middlewares/telemetry"
 )
 
 // Router is the http.Handler for one entry point. It sends each request to
