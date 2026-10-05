@@ -5,23 +5,14 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/SDkie/yarp/internal/cache"
 	"github.com/SDkie/yarp/internal/config"
 	"github.com/SDkie/yarp/internal/middlewares/telemetry"
-	"github.com/SDkie/yarp/internal/router"
-	"golang.org/x/sync/errgroup"
-)
-
-const (
-	shutdownTimeout   = 10 * time.Second
-	readHeaderTimeout = 10 * time.Second
-	idleTimeout       = 180 * time.Second
+	"github.com/SDkie/yarp/internal/server"
 )
 
 // version is yarp's version; release builds can set it with
@@ -29,6 +20,15 @@ const (
 var version = "0.1.0"
 
 func main() {
+	// run has already logged the error.
+	if err := run(); err != nil {
+		os.Exit(1)
+	}
+}
+
+// run starts yarp and blocks until it stops. Errors are logged where they
+// happen, before the deferred tel.Stop, so they are exported too.
+func run() error {
 	logLevel := new(slog.LevelVar)
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
 
@@ -38,7 +38,7 @@ func main() {
 	cfg, routes, err := loadConfig(*configPath)
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
-		os.Exit(1)
+		return err
 	}
 	level, _ := cfg.Log.GetLevel() // validated by loadConfig
 	logLevel.Set(level)
@@ -48,8 +48,9 @@ func main() {
 	tel, err := telemetry.Setup(cfg.Otel, version, logLevel)
 	if err != nil {
 		slog.Error("failed to set up OpenTelemetry", "error", err)
-		os.Exit(1)
+		return err
 	}
+	defer tel.Stop() // runs last, so every line before it is exported
 
 	// c stays nil when the cache is disabled.
 	var c *cache.Cache
@@ -57,51 +58,34 @@ func main() {
 		c, err = cache.Open()
 		if err != nil {
 			slog.Error("failed to open cache", "error", err)
-			tel.Stop()
-			os.Exit(1)
+			return err
 		}
+		defer closeCache(c)
 	}
 	slog.Info("cache configured", "enabled", cfg.Cache.Enabled)
 
-	handlers, err := router.Build(cfg.EntryPoints, routes.Routes, c, tel)
+	srv, err := server.New(cfg.EntryPoints, routes.Routes, c, tel)
 	if err != nil {
 		slog.Error("failed to build routers", "error", err)
-		closeCache(c)
-		tel.Stop()
-		os.Exit(1)
+		return err
+	}
+	if err := srv.Listen(); err != nil {
+		slog.Error("failed to listen", "error", err)
+		return err
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	g, gctx := errgroup.WithContext(ctx)
-
-	// gctx is cancelled on a shutdown signal or when any entry point fails,
-	// which makes every other entry point shut down too.
-	for name, ep := range cfg.EntryPoints {
-		g.Go(func() error {
-			return serve(gctx, name, ep, handlers[name])
-		})
-	}
-
-	err = g.Wait()
-	stop()
-	closeCache(c)
-	if err != nil {
+	defer stop()
+	if err := srv.Serve(ctx); err != nil {
 		slog.Error("yarp exited with error", "error", err)
-	} else {
-		slog.Info("yarp stopped")
+		return err
 	}
-	tel.Stop() // last, so the lines above are exported too
-	if err != nil {
-		os.Exit(1)
-	}
+	slog.Info("yarp stopped")
+	return nil
 }
 
-// closeCache flushes and closes the cache. It is called explicitly rather
-// than deferred, because os.Exit skips deferred calls.
+// closeCache flushes and closes the cache.
 func closeCache(c *cache.Cache) {
-	if c == nil {
-		return
-	}
 	if err := c.Close(); err != nil {
 		slog.Error("failed to close cache", "error", err)
 	}
@@ -119,38 +103,4 @@ func loadConfig(path string) (*config.Config, *config.RoutesConfig, error) {
 		return nil, nil, fmt.Errorf("file provider: %w", err)
 	}
 	return cfg, routes, nil
-}
-
-// serve runs an HTTP server for the named entry point, handling requests
-// with handler, until ctx is cancelled, then shuts it down gracefully within
-// shutdownTimeout.
-func serve(ctx context.Context, name string, ep config.EntryPoint, handler http.Handler) error {
-	srv := &http.Server{
-		Addr:              ep.Address,
-		Handler:           handler,
-		ReadHeaderTimeout: readHeaderTimeout,
-		IdleTimeout:       idleTimeout,
-		// The server's own errors, such as handler panics, go through slog too.
-		ErrorLog: slog.NewLogLogger(slog.Default().Handler(), slog.LevelError),
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		slog.Info("entrypoint starting", "name", name, "address", ep.Address)
-		errCh <- srv.ListenAndServe()
-	}()
-
-	select {
-	case err := <-errCh:
-		return fmt.Errorf("entrypoint %q: %w", name, err)
-	case <-ctx.Done():
-	}
-
-	slog.Info("entrypoint shutting down", "name", name, "reason", context.Cause(ctx))
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("entrypoint %q: shutdown: %w", name, err)
-	}
-	return nil
 }
