@@ -1,11 +1,13 @@
 package httpcache
 
 import (
+	"context"
 	"net/http"
 	"time"
 )
 
-// serveMiss forwards r and stores the response when it may be reused.
+// serveMiss forwards r and, when the response may be reused, stores it in
+// the background so the client never waits for the write.
 func (h *handler) serveMiss(w http.ResponseWriter, r *http.Request) {
 	h.tel.RecordCacheResult(r.Context(), cacheResultMiss)
 	requestTime := time.Now()
@@ -24,17 +26,12 @@ func (h *handler) serveMiss(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// save stores the response recorded for r until it becomes stale at
-// expiresAt.
+// save stores the response recorded for r until expiresAt, writing it in a new goroutine
 func (h *handler) save(r *http.Request, rec *recorder, generatedAt, expiresAt time.Time) {
 	ttl := time.Until(expiresAt)
 	if ttl <= 0 {
 		return
 	}
-	// Both records expire from the store once the response is stale,
-	// rounded up to a whole second so never early. Hits still check
-	// ExpiresAt.
-	ttl = ttl.Truncate(time.Second) + time.Second
 
 	names, _ := getVaryNames(rec.header) // Vary: * was rejected by isStorable.
 	respKey, respPlain := getRespKey(r, names)
@@ -47,8 +44,14 @@ func (h *handler) save(r *http.Request, rec *recorder, generatedAt, expiresAt ti
 		ExpiresAt:   expiresAt,
 	}
 	varyKey, varyPlain := getVaryKey(r.Method, r)
-	// The response first, so the Vary record never points to nothing.
-	if store(r.Context(), h.c, respKey, e, ttl) {
-		store(r.Context(), h.c, varyKey, &varyRecord{Key: varyPlain, Names: names}, ttl)
-	}
+	vary := &varyRecord{Key: varyPlain, Names: names}
+	// Keeps the trace for logs, without r's cancellation.
+	ctx := context.WithoutCancel(r.Context())
+
+	go func() {
+		// The response first, so the Vary record never points to nothing.
+		if store(ctx, h.c, respKey, e, ttl) {
+			store(ctx, h.c, varyKey, vary, ttl)
+		}
+	}()
 }
