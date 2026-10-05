@@ -68,6 +68,9 @@ func Build(entryPoints map[string]config.EntryPoint, routes map[string]config.Ro
 	handlers := make(map[string]http.Handler, len(entryPoints))
 	for ep := range entryPoints {
 		rs := byEntryPoint[ep]
+		if len(rs) == 0 {
+			slog.Error("entry point has no routes, every request gets 404", "entrypoint", ep)
+		}
 		slices.SortFunc(rs, compareSpecificity)
 		for i := 1; i < len(rs); i++ {
 			if rs[i-1].host == rs[i].host && rs[i-1].pathPrefix == rs[i].pathPrefix {
@@ -116,6 +119,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		routeName = rt.routes[i].name
 		rt.routes[i].handler.ServeHTTP(sw, r)
 	} else {
+		slog.Error("no matching route", "entrypoint", rt.entryPoint, "method", r.Method, "host", r.Host, "path", r.URL.Path)
 		http.Error(sw, "no matching route", http.StatusNotFound)
 	}
 

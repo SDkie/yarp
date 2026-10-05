@@ -130,6 +130,8 @@ func serve(ctx context.Context, name string, ep config.EntryPoint, handler http.
 		Handler:           handler,
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
+		// The server's own errors, such as handler panics, go through slog too.
+		ErrorLog: slog.NewLogLogger(slog.Default().Handler(), slog.LevelError),
 	}
 
 	errCh := make(chan error, 1)

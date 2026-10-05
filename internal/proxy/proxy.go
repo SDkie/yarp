@@ -75,6 +75,10 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 	telemetry.RecordBackendRequest(r.Context(), r.Method, target, p.name, resp.StatusCode, nil, time.Since(start))
+	// Any 5xx status is a server error
+	if resp.StatusCode >= http.StatusInternalServerError {
+		slog.Warn("backend returned a server error", "route", p.name, "server", target.Host, "status", resp.StatusCode)
+	}
 
 	removeHopByHopHeaders(resp.Header)
 	copyHeader(w.Header(), resp.Header)
