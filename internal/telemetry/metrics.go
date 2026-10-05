@@ -59,16 +59,29 @@ func StartRequest(r *http.Request, entryPoint string) (ctx context.Context, end 
 	}
 }
 
-// RecordBackendRequest records a request yarp sent to server for route: its
-// status code, or err if no response arrived.
-func RecordBackendRequest(ctx context.Context, method string, server *url.URL, route string, status int, err error, d time.Duration) {
-	attrs := []attribute.KeyValue{attribute.String("yarp.route", route)}
-	if err != nil {
-		attrs = append(attrs, semconv.ErrorType(err))
-	} else {
-		attrs = append(attrs, clientDuration.AttrResponseStatusCode(status))
+// StartBackendRequest starts a span for req, which yarp sends to server for
+// route, and puts its traceparent in req's headers. The returned end records
+// the status code, or err if no response arrived. A request the client
+// cancelled is not counted as a backend error.
+func StartBackendRequest(req *http.Request, server *url.URL, route string) (end func(status int, err error)) {
+	start := time.Now()
+	ctx := req.Context()
+	m := getMethodAttr(req.Method)
+	span := startClientSpan(req, m, server, route)
+	return func(status int, err error) {
+		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+			span.End()
+			return
+		}
+		endClientSpan(span, status, err)
+		attrs := []attribute.KeyValue{attribute.String("yarp.route", route)}
+		if err != nil {
+			attrs = append(attrs, semconv.ErrorType(err))
+		} else {
+			attrs = append(attrs, clientDuration.AttrResponseStatusCode(status))
+		}
+		clientDuration.Record(ctx, time.Since(start).Seconds(), m, server.Hostname(), getPort(server), attrs...)
 	}
-	clientDuration.Record(ctx, d.Seconds(), getMethodAttr(method), server.Hostname(), getPort(server), attrs...)
 }
 
 // RecordCacheResult counts a request by its cache result, such as "hit".

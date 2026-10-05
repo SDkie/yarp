@@ -17,7 +17,6 @@ import (
 	"net/url"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	"github.com/SDkie/yarp/internal/telemetry"
 )
@@ -62,19 +61,19 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// RoundTrip rather than http.Client: a proxy must pass backend
 	// redirects through to the client, not follow them itself.
-	start := time.Now()
+	end := telemetry.StartBackendRequest(outreq, target, p.name)
 	resp, err := p.transport.RoundTrip(outreq)
 	if err != nil {
+		end(0, err)
 		if errors.Is(err, context.Canceled) && r.Context().Err() != nil {
 			return // The client went away; nobody is left to answer.
 		}
-		telemetry.RecordBackendRequest(r.Context(), r.Method, target, p.name, 0, err, time.Since(start))
 		slog.Error("proxy error", "route", p.name, "server", target.Host, "error", err)
 		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-	telemetry.RecordBackendRequest(r.Context(), r.Method, target, p.name, resp.StatusCode, nil, time.Since(start))
+	end(resp.StatusCode, nil)
 	// Any 5xx status is a server error
 	if resp.StatusCode >= http.StatusInternalServerError {
 		slog.Warn("backend returned a server error", "route", p.name, "server", target.Host, "status", resp.StatusCode)
