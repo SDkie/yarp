@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
@@ -120,11 +121,11 @@ func HTTPCache(c *cache.Cache, next http.Handler) http.Handler {
 
 		varyKey, varyPlain := getVaryKey(r.Method, r)
 		var vary varyRecord
-		if load(c, varyKey, &vary) && vary.Key == varyPlain {
+		if load(r.Context(), c, varyKey, &vary) && vary.Key == varyPlain {
 			respKey, respPlain := getRespKey(r, vary.Names)
 			var e Record
 			// A stale response is fetched again: yarp cannot validate it yet.
-			if load(c, respKey, &e) && e.Key == respPlain && time.Now().Before(e.ExpiresAt) {
+			if load(r.Context(), c, respKey, &e) && e.Key == respPlain && time.Now().Before(e.ExpiresAt) {
 				telemetry.RecordCacheResult(r.Context(), cacheResultHit)
 				if isNotModified(r, &e) {
 					writeNotModified(w, &e)
@@ -180,8 +181,8 @@ func HTTPCache(c *cache.Cache, next http.Handler) http.Handler {
 		// could drop a fresh response early. Hits still check ExpiresAt.
 		ttl = ttl.Truncate(time.Second) + time.Second
 		// The response first, so the Vary record never points to nothing.
-		if store(c, respKey, e, ttl) {
-			store(c, varyKey, &varyRecord{Key: varyPlain, Names: names}, ttl)
+		if store(r.Context(), c, respKey, e, ttl) {
+			store(r.Context(), c, varyKey, &varyRecord{Key: varyPlain, Names: names}, ttl)
 		}
 	})
 }
@@ -241,7 +242,7 @@ func invalidate(c *cache.Cache, r *http.Request) {
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		key, plain := getVaryKey(method, r)
 		if err := c.Delete(key); err != nil {
-			slog.Error("cache invalidation failed", "key", plain, "error", err)
+			slog.ErrorContext(r.Context(), "cache invalidation failed", "key", plain, "error", err)
 		}
 	}
 }
@@ -320,17 +321,17 @@ func getVaryNames(h http.Header) (names []string, ok bool) {
 
 // load decodes the value stored under key into v. Missing keys and read or
 // decode failures (which are logged) report false.
-func load(c *cache.Cache, key string, v any) bool {
+func load(ctx context.Context, c *cache.Cache, key string, v any) bool {
 	data, found, err := c.Get(key)
 	if err != nil {
-		slog.Error("cache read failed", "key", key, "error", err)
+		slog.ErrorContext(ctx, "cache read failed", "key", key, "error", err)
 		return false
 	}
 	if !found {
 		return false
 	}
 	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(v); err != nil {
-		slog.Error("cache entry is corrupt", "key", key, "error", err)
+		slog.ErrorContext(ctx, "cache entry is corrupt", "key", key, "error", err)
 		return false
 	}
 	return true
@@ -339,14 +340,14 @@ func load(c *cache.Cache, key string, v any) bool {
 // store saves v under key until ttl passes and reports whether it was saved.
 // Failures are logged; the response has already been sent, so they never
 // affect the client.
-func store(c *cache.Cache, key string, v any, ttl time.Duration) bool {
+func store(ctx context.Context, c *cache.Cache, key string, v any, ttl time.Duration) bool {
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(v); err != nil {
-		slog.Error("cache encode failed", "key", key, "error", err)
+		slog.ErrorContext(ctx, "cache encode failed", "key", key, "error", err)
 		return false
 	}
 	if err := c.Set(key, buf.Bytes(), ttl); err != nil {
-		slog.Error("cache write failed", "key", key, "error", err)
+		slog.ErrorContext(ctx, "cache write failed", "key", key, "error", err)
 		return false
 	}
 	return true

@@ -120,11 +120,11 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		routeName = rt.routes[i].name
 		rt.routes[i].handler.ServeHTTP(sw, r)
 	} else {
-		slog.Error("no matching route", "entrypoint", rt.entryPoint, "method", r.Method, "host", r.Host, "path", r.URL.Path)
+		slog.ErrorContext(r.Context(), "no matching route", "entrypoint", rt.entryPoint, "method", r.Method, "host", r.Host, "path", r.URL.Path)
 		http.Error(sw, "no matching route", http.StatusNotFound)
 	}
 
-	slog.Info("request",
+	slog.InfoContext(r.Context(), "request",
 		"entrypoint", rt.entryPoint,
 		"route", routeName,
 		"method", r.Method,

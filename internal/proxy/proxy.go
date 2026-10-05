@@ -68,7 +68,7 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, context.Canceled) && r.Context().Err() != nil {
 			return // The client went away; nobody is left to answer.
 		}
-		slog.Error("proxy error", "route", p.name, "server", target.Host, "error", err)
+		slog.ErrorContext(r.Context(), "proxy error", "route", p.name, "server", target.Host, "error", err)
 		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
@@ -76,7 +76,7 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	end(resp.StatusCode, nil)
 	// Any 5xx status is a server error
 	if resp.StatusCode >= http.StatusInternalServerError {
-		slog.Warn("backend returned a server error", "route", p.name, "server", target.Host, "status", resp.StatusCode)
+		slog.WarnContext(r.Context(), "backend returned a server error", "route", p.name, "server", target.Host, "status", resp.StatusCode)
 	}
 
 	removeHopByHopHeaders(resp.Header)
@@ -96,7 +96,7 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if err := copyBody(w, resp.Body, flushImmediately(resp)); err != nil {
 		if errors.Is(err, errBackendRead) {
-			slog.Warn("proxy: backend response body interrupted", "route", p.name, "server", target.Host, "error", err)
+			slog.WarnContext(r.Context(), "proxy: backend response body interrupted", "route", p.name, "server", target.Host, "error", err)
 		}
 		// The status line is already sent, so the only way to tell the
 		// client the response is incomplete is to close the connection.
