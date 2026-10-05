@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/semconv/v1.43.0/httpconv"
+	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -84,9 +85,12 @@ func StartBackendRequest(req *http.Request, server *url.URL, route string) (end 
 	}
 }
 
-// RecordCacheResult counts a request by its cache result, such as "hit".
+// RecordCacheResult counts a request by its cache result, such as "hit",
+// and adds the result to the request's span.
 func RecordCacheResult(ctx context.Context, result string) {
-	cacheRequests.Add(ctx, 1, metric.WithAttributes(attribute.String("yarp.cache.result", result)))
+	attr := attribute.String("yarp.cache.result", result)
+	cacheRequests.Add(ctx, 1, metric.WithAttributes(attr))
+	trace.SpanFromContext(ctx).SetAttributes(attr)
 }
 
 // getMethodAttr returns method, or "_OTHER" for a non-standard one, which
