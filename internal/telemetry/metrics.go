@@ -39,14 +39,17 @@ func init() {
 	}
 }
 
-// StartRequest counts a request as active on entryPoint. The returned end
-// records its duration and status code (0 if nothing was sent).
-func StartRequest(ctx context.Context, method, entryPoint string) (end func(status int, route string)) {
+// StartRequest starts a span for r and counts it as active on entryPoint.
+// The returned ctx carries the span. The returned end records its duration
+// and status code (0 if nothing was sent).
+func StartRequest(r *http.Request, entryPoint string) (ctx context.Context, end func(status int, route string)) {
 	start := time.Now()
-	m := getMethodAttr(method)
+	m := getMethodAttr(r.Method)
+	ctx, span := startServerSpan(r, m, entryPoint)
 	ep := attribute.String("yarp.entrypoint", entryPoint)
 	serverActive.Add(ctx, 1, m, "http", ep)
-	return func(status int, route string) {
+	return ctx, func(status int, route string) {
+		endServerSpan(span, status, route)
 		serverActive.Add(ctx, -1, m, "http", ep)
 		attrs := []attribute.KeyValue{ep, attribute.String("yarp.route", route)}
 		if status > 0 {

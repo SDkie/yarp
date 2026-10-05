@@ -108,7 +108,8 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	routeName := ""
 	sw := &statusWriter{ResponseWriter: w}
-	end := telemetry.StartRequest(r.Context(), r.Method, rt.entryPoint)
+	ctx, end := telemetry.StartRequest(r, rt.entryPoint)
+	r = r.WithContext(ctx)
 	// Deferred, so the request is ended even if a handler panics.
 	defer func() { end(sw.status, routeName) }()
 
