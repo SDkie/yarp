@@ -9,8 +9,9 @@ import (
 	"github.com/dgraph-io/badger/v4"
 )
 
-// dir is where the store keeps its data, relative to the working directory.
-const dir = ".cache"
+// DefaultDir is where yarp stores the HTTP cache, relative to the working
+// directory.
+const DefaultDir = ".cache"
 
 // Cache is a key/value store backed by BadgerDB. It is safe for concurrent
 // use.
@@ -18,9 +19,9 @@ type Cache struct {
 	db *badger.DB
 }
 
-// Open opens the store in the .cache directory, creating it if needed. The
-// caller must call Close when done.
-func Open() (*Cache, error) {
+// Open opens the store in dir, creating it if needed. Only one Cache may use
+// a dir at a time. The caller must call Close when done.
+func Open(dir string) (*Cache, error) {
 	opts := badger.DefaultOptions(dir).WithLogger(badgerLogger{})
 	db, err := badger.Open(opts)
 	if err != nil {

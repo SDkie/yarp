@@ -55,7 +55,7 @@ func run() error {
 	// c stays nil when the cache is disabled.
 	var c *cache.Cache
 	if cfg.Cache.Enabled {
-		c, err = cache.Open()
+		c, err = cache.Open(cache.DefaultDir)
 		if err != nil {
 			slog.Error("failed to open cache", "error", err)
 			return err

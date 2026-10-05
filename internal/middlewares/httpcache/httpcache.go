@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SDkie/yarp/internal/cache"
 	"github.com/SDkie/yarp/internal/middlewares/telemetry"
 )
 
@@ -27,10 +26,10 @@ import (
 //	"resp:" + sha256(variant)   → the stored response (Record)
 //
 // base is the method, host, path and query; variant is base plus this
-// request's values for the Vary header names (see getVaryKey, getRespKey). Hashing keeps keys short
-// (Badger rejects keys over 65,000 bytes) and keeps URLs, which can carry
-// tokens, out of key names. Each value stores its plain key, which is
-// compared on read so a mismatch is never served.
+// request's values for the Vary header names (see getVaryKey, getRespKey).
+// Hashing keeps keys short and keeps URLs, which can carry tokens, out of
+// key names. Each value stores its plain key, which is compared on read so
+// a mismatch is never served.
 const (
 	varyPrefix = "vary:"
 	respPrefix = "resp:"
@@ -97,8 +96,8 @@ type varyRecord struct {
 //   - Every response gets a Cache-Status entry: hit, miss or bypass (RFC
 //     9211).
 //
-// Each request's cache result is recorded in tel.
-func New(c *cache.Cache, tel *telemetry.Telemetry, next http.Handler) http.Handler {
+// c must not be nil. Each request's cache result is recorded in tel.
+func New(c Store, tel *telemetry.Telemetry, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead:
@@ -181,9 +180,9 @@ func New(c *cache.Cache, tel *telemetry.Telemetry, next http.Handler) http.Handl
 		if ttl <= 0 {
 			return
 		}
-		// Both records expire from the store once the response is stale. The
-		// store counts expiry in whole seconds, so round up: rounding down
-		// could drop a fresh response early. Hits still check ExpiresAt.
+		// Both records expire from the store once the response is stale,
+		// rounded up to a whole second so never early. Hits still check
+		// ExpiresAt.
 		ttl = ttl.Truncate(time.Second) + time.Second
 		// The response first, so the Vary record never points to nothing.
 		if store(r.Context(), c, respKey, e, ttl) {
@@ -243,7 +242,7 @@ func isStorable(r *http.Request, status int, header http.Header, cc cacheControl
 // invalidate drops the cached GET and HEAD responses for r's URL by
 // deleting their Vary records, which makes every stored variant
 // unreachable.
-func invalidate(c *cache.Cache, r *http.Request) {
+func invalidate(c Store, r *http.Request) {
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		key, plain := getVaryKey(method, r)
 		if err := c.Delete(key); err != nil {
@@ -326,7 +325,7 @@ func getVaryNames(h http.Header) (names []string, ok bool) {
 
 // load decodes the value stored under key into v. Missing keys and read or
 // decode failures (which are logged) report false.
-func load(ctx context.Context, c *cache.Cache, key string, v any) bool {
+func load(ctx context.Context, c Store, key string, v any) bool {
 	data, found, err := c.Get(key)
 	if err != nil {
 		slog.ErrorContext(ctx, "cache read failed", "key", key, "error", err)
@@ -345,7 +344,7 @@ func load(ctx context.Context, c *cache.Cache, key string, v any) bool {
 // store saves v under key until ttl passes and reports whether it was saved.
 // Failures are logged; the response has already been sent, so they never
 // affect the client.
-func store(ctx context.Context, c *cache.Cache, key string, v any, ttl time.Duration) bool {
+func store(ctx context.Context, c Store, key string, v any, ttl time.Duration) bool {
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(v); err != nil {
 		slog.ErrorContext(ctx, "cache encode failed", "key", key, "error", err)
