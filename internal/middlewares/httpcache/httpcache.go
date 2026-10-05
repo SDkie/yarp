@@ -1,4 +1,6 @@
-package middleware
+// Package httpcache is a middleware that caches backend responses
+// (RFC 9111) and marks each response with a Cache-Status (RFC 9211).
+package httpcache
 
 import (
 	"bytes"
@@ -62,10 +64,11 @@ type varyRecord struct {
 	Names []string
 }
 
-// HTTPCache caches responses to GET and HEAD requests in c and replies from
-// it when a response for the same method, host, path and query, and the same
-// values of the request headers named in the response's Vary header, is
-// stored. It follows these RFC 9111 and RFC 9211 rules:
+// New returns next wrapped so it caches responses to GET and HEAD requests
+// in c and replies from it when a response for the same method, host, path
+// and query, and the same values of the request headers named in the
+// response's Vary header, is stored. It follows these RFC 9111 and RFC 9211
+// rules:
 //
 //   - Only final, complete responses are stored, never 206 or 304
 //     (sections 3, 3.3, 4.3.4). Requests with Range, If-Match,
@@ -88,7 +91,7 @@ type varyRecord struct {
 //     9211).
 //
 // Each request's cache result is recorded in tel.
-func HTTPCache(c *cache.Cache, tel *telemetry.Telemetry, next http.Handler) http.Handler {
+func New(c *cache.Cache, tel *telemetry.Telemetry, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead:

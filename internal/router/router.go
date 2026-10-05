@@ -14,7 +14,7 @@ import (
 
 	"github.com/SDkie/yarp/internal/cache"
 	"github.com/SDkie/yarp/internal/config"
-	"github.com/SDkie/yarp/internal/middleware"
+	"github.com/SDkie/yarp/internal/middlewares/httpcache"
 	"github.com/SDkie/yarp/internal/telemetry"
 )
 
@@ -53,7 +53,7 @@ func Build(entryPoints map[string]config.EntryPoint, routes map[string]config.Ro
 		}
 		var handler http.Handler = proxy
 		if c != nil {
-			handler = middleware.HTTPCache(c, tel, proxy)
+			handler = httpcache.New(c, tel, proxy)
 		}
 		rt := route{
 			name:       name,

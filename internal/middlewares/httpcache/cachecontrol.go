@@ -1,4 +1,4 @@
-package middleware
+package httpcache
 
 import (
 	"net/http"
