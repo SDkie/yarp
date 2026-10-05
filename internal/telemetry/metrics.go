@@ -6,14 +6,21 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/semconv/v1.43.0/httpconv"
 	"go.opentelemetry.io/otel/trace"
+)
+
+// CacheResult is how the cache handled a request.
+type CacheResult int
+
+const (
+	CacheHit CacheResult = iota
+	CacheMiss
+	CacheBypass
 )
 
 var (
@@ -23,6 +30,14 @@ var (
 	serverActive   httpconv.ServerActiveRequests
 	clientDuration httpconv.ClientRequestDuration
 	cacheRequests  metric.Int64Counter
+
+	// Built once, so counting a cache result allocates nothing.
+	cacheResultAttrs = [...]attribute.KeyValue{
+		CacheHit:    attribute.String("yarp.cache.result", "hit"),
+		CacheMiss:   attribute.String("yarp.cache.result", "miss"),
+		CacheBypass: attribute.String("yarp.cache.result", "bypass"),
+	}
+	cacheResultOpts [len(cacheResultAttrs)]metric.AddOption
 )
 
 // init creates the instruments. They use the global meter provider, so they
@@ -38,59 +53,19 @@ func init() {
 	if err := errors.Join(errs[:]...); err != nil {
 		panic(err)
 	}
-}
-
-// StartRequest starts a span for r and counts it as active on entryPoint.
-// The returned ctx carries the span. The returned end records its duration
-// and status code (0 if nothing was sent).
-func StartRequest(r *http.Request, entryPoint string) (ctx context.Context, end func(status int, route string)) {
-	start := time.Now()
-	m := getMethodAttr(r.Method)
-	ctx, span := startServerSpan(r, m, entryPoint)
-	ep := attribute.String("yarp.entrypoint", entryPoint)
-	serverActive.Add(ctx, 1, m, "http", ep)
-	return ctx, func(status int, route string) {
-		endServerSpan(span, status, route)
-		serverActive.Add(ctx, -1, m, "http", ep)
-		attrs := []attribute.KeyValue{ep, attribute.String("yarp.route", route)}
-		if status > 0 {
-			attrs = append(attrs, serverDuration.AttrResponseStatusCode(status))
-		}
-		serverDuration.Record(ctx, time.Since(start).Seconds(), m, "http", attrs...)
+	for i, attr := range cacheResultAttrs {
+		cacheResultOpts[i] = metric.WithAttributeSet(attribute.NewSet(attr))
 	}
 }
 
-// StartBackendRequest starts a span for req, which yarp sends to server for
-// route, and puts its traceparent in req's headers. The returned end records
-// the status code, or err if no response arrived. A request the client
-// cancelled is not counted as a backend error.
-func StartBackendRequest(req *http.Request, server *url.URL, route string) (end func(status int, err error)) {
-	start := time.Now()
-	ctx := req.Context()
-	m := getMethodAttr(req.Method)
-	span := startClientSpan(req, m, server, route)
-	return func(status int, err error) {
-		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
-			span.End()
-			return
-		}
-		endClientSpan(span, status, err)
-		attrs := []attribute.KeyValue{attribute.String("yarp.route", route)}
-		if err != nil {
-			attrs = append(attrs, semconv.ErrorType(err))
-		} else {
-			attrs = append(attrs, clientDuration.AttrResponseStatusCode(status))
-		}
-		clientDuration.Record(ctx, time.Since(start).Seconds(), m, server.Hostname(), getPort(server), attrs...)
+// RecordCacheResult counts a request by its cache result and adds the
+// result to the request's span. It does nothing when telemetry is off.
+func (t *Telemetry) RecordCacheResult(ctx context.Context, result CacheResult) {
+	if t == nil {
+		return
 	}
-}
-
-// RecordCacheResult counts a request by its cache result, such as "hit",
-// and adds the result to the request's span.
-func RecordCacheResult(ctx context.Context, result string) {
-	attr := attribute.String("yarp.cache.result", result)
-	cacheRequests.Add(ctx, 1, metric.WithAttributes(attr))
-	trace.SpanFromContext(ctx).SetAttributes(attr)
+	cacheRequests.Add(ctx, 1, cacheResultOpts[result])
+	trace.SpanFromContext(ctx).SetAttributes(cacheResultAttrs[result])
 }
 
 // getMethodAttr returns method, or "_OTHER" for a non-standard one, which

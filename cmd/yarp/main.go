@@ -45,7 +45,7 @@ func main() {
 	slog.Info("config loaded", "path", *configPath, "entryPoints", len(cfg.EntryPoints),
 		"routesPath", cfg.Providers.File.Filename, "routes", len(routes.Routes))
 
-	stopTelemetry, err := telemetry.Setup(cfg.Otel, version, logLevel)
+	tel, err := telemetry.Setup(cfg.Otel, version, logLevel)
 	if err != nil {
 		slog.Error("failed to set up OpenTelemetry", "error", err)
 		os.Exit(1)
@@ -57,17 +57,17 @@ func main() {
 		c, err = cache.Open()
 		if err != nil {
 			slog.Error("failed to open cache", "error", err)
-			stopTelemetry()
+			tel.Stop()
 			os.Exit(1)
 		}
 	}
 	slog.Info("cache configured", "enabled", cfg.Cache.Enabled)
 
-	handlers, err := router.Build(cfg.EntryPoints, routes.Routes, c)
+	handlers, err := router.Build(cfg.EntryPoints, routes.Routes, c, tel)
 	if err != nil {
 		slog.Error("failed to build routers", "error", err)
 		closeCache(c)
-		stopTelemetry()
+		tel.Stop()
 		os.Exit(1)
 	}
 
@@ -90,7 +90,7 @@ func main() {
 	} else {
 		slog.Info("yarp stopped")
 	}
-	stopTelemetry() // last, so the lines above are exported too
+	tel.Stop() // last, so the lines above are exported too
 	if err != nil {
 		os.Exit(1)
 	}

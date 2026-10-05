@@ -17,8 +17,6 @@ import (
 	"net/url"
 	"strings"
 	"sync/atomic"
-
-	"github.com/SDkie/yarp/internal/telemetry"
 )
 
 // hopHeaders apply to a single connection and must not be forwarded
@@ -61,10 +59,8 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// RoundTrip rather than http.Client: a proxy must pass backend
 	// redirects through to the client, not follow them itself.
-	end := telemetry.StartBackendRequest(outreq, target, p.name)
 	resp, err := p.transport.RoundTrip(outreq)
 	if err != nil {
-		end(0, err)
 		if errors.Is(err, context.Canceled) && r.Context().Err() != nil {
 			return // The client went away; nobody is left to answer.
 		}
@@ -73,7 +69,6 @@ func (p *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	end(resp.StatusCode, nil)
 	// Any 5xx status is a server error
 	if resp.StatusCode >= http.StatusInternalServerError {
 		slog.WarnContext(r.Context(), "backend returned a server error", "route", p.name, "server", target.Host, "status", resp.StatusCode)

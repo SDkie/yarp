@@ -40,19 +40,20 @@ type route struct {
 // It fails if two routes on the same entry point have the same host and
 // pathPrefix, since only one of them could ever match. All routes share one
 // backend transport, so they reuse the same connection pool. Responses are
-// cached in c; a nil c disables caching.
-func Build(entryPoints map[string]config.EntryPoint, routes map[string]config.Route, c *cache.Cache) (map[string]http.Handler, error) {
+// cached in c; a nil c disables caching. Requests are traced and measured
+// with tel; a nil tel disables that.
+func Build(entryPoints map[string]config.EntryPoint, routes map[string]config.Route, c *cache.Cache, tel *telemetry.Telemetry) (map[string]http.Handler, error) {
 	transport := newTransport()
 	byEntryPoint := make(map[string][]route, len(entryPoints))
 	for _, name := range slices.Sorted(maps.Keys(routes)) {
 		r := routes[name]
-		proxy, err := newProxy(name, r.Servers, transport)
+		proxy, err := newProxy(name, r.Servers, tel.Transport(transport, name))
 		if err != nil {
 			return nil, err
 		}
 		var handler http.Handler = proxy
 		if c != nil {
-			handler = middleware.HTTPCache(c, proxy)
+			handler = middleware.HTTPCache(c, tel, proxy)
 		}
 		rt := route{
 			name:       name,
@@ -78,7 +79,7 @@ func Build(entryPoints map[string]config.EntryPoint, routes map[string]config.Ro
 					ep, rs[i-1].name, rs[i].name)
 			}
 		}
-		handlers[ep] = &Router{entryPoint: ep, routes: rs}
+		handlers[ep] = tel.Handler(ep, &Router{entryPoint: ep, routes: rs})
 	}
 	return handlers, nil
 }
@@ -107,21 +108,17 @@ func hostRank(host string) int {
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	routeName := ""
-	sw := &statusWriter{ResponseWriter: w}
-	ctx, end := telemetry.StartRequest(r, rt.entryPoint)
-	r = r.WithContext(ctx)
-	// Deferred, so the request is ended even if a handler panics.
-	defer func() { end(sw.status, routeName) }()
-
 	host := requestHost(r)
 	if i := slices.IndexFunc(rt.routes, func(route route) bool {
 		return route.matchHost(host) && route.matchPath(r.URL.Path)
 	}); i >= 0 {
 		routeName = rt.routes[i].name
-		rt.routes[i].handler.ServeHTTP(sw, r)
+		// w as received, since SetRoute needs telemetry's own writer.
+		telemetry.SetRoute(w, routeName)
+		rt.routes[i].handler.ServeHTTP(w, r)
 	} else {
 		slog.ErrorContext(r.Context(), "no matching route", "entrypoint", rt.entryPoint, "method", r.Method, "host", r.Host, "path", r.URL.Path)
-		http.Error(sw, "no matching route", http.StatusNotFound)
+		http.Error(w, "no matching route", http.StatusNotFound)
 	}
 
 	slog.InfoContext(r.Context(), "request",

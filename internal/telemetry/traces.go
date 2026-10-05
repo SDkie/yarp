@@ -17,9 +17,9 @@ import (
 
 var tracer = otel.Tracer(scopeName)
 
-// startServerSpan starts the span for a request received on entryPoint. It
-// continues the client's trace if r has a traceparent header.
-func startServerSpan(r *http.Request, method httpconv.RequestMethodAttr, entryPoint string) (context.Context, trace.Span) {
+// startServerSpan starts the span for a request received on the entry point
+// ep. It continues the client's trace if r has a traceparent header.
+func startServerSpan(r *http.Request, method httpconv.RequestMethodAttr, ep attribute.KeyValue) (context.Context, trace.Span) {
 	ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
 	return tracer.Start(ctx, getSpanName(method),
 		trace.WithSpanKind(trace.SpanKindServer),
@@ -28,7 +28,7 @@ func startServerSpan(r *http.Request, method httpconv.RequestMethodAttr, entryPo
 			semconv.URLScheme("http"),
 			semconv.ServerAddress(r.Host),
 			semconv.URLPath(r.URL.Path),
-			attribute.String("yarp.entrypoint", entryPoint),
+			ep,
 		))
 }
 
@@ -47,20 +47,18 @@ func endServerSpan(span trace.Span, status int, route string) {
 	span.End()
 }
 
-// startClientSpan starts the span for req, which yarp sends to server for
-// route, and puts the span's traceparent in req's headers.
-func startClientSpan(req *http.Request, method httpconv.RequestMethodAttr, server *url.URL, route string) trace.Span {
-	ctx, span := tracer.Start(req.Context(), getSpanName(method),
+// startClientSpan starts the span for req, which yarp sends to a backend of
+// route.
+func startClientSpan(req *http.Request, method httpconv.RequestMethodAttr, route attribute.KeyValue) (context.Context, trace.Span) {
+	return tracer.Start(req.Context(), getSpanName(method),
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
 			semconv.HTTPRequestMethodKey.String(string(method)),
-			semconv.ServerAddress(server.Hostname()),
-			semconv.ServerPort(getPort(server)),
+			semconv.ServerAddress(req.URL.Hostname()),
+			semconv.ServerPort(getPort(req.URL)),
 			semconv.URLFull(getURLWithoutQuery(req.URL)),
-			attribute.String("yarp.route", route),
+			route,
 		))
-	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
-	return span
 }
 
 // endClientSpan records the backend's status code, or err if no response

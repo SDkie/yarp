@@ -33,12 +33,21 @@ const (
 	metricInterval = 15 * time.Second
 )
 
+// Telemetry is a running OpenTelemetry setup. A nil *Telemetry means it is
+// off: its methods then do nothing and add no overhead.
+type Telemetry struct {
+	console        *slog.Logger // the default logger before Setup
+	tracerProvider *sdktrace.TracerProvider
+	meterProvider  *sdkmetric.MeterProvider
+	loggerProvider *sdklog.LoggerProvider
+}
+
 // Setup starts OpenTelemetry for this version of yarp and also sends the
-// default logger's records at or above level to it; stop flushes and shuts
-// it down. A nil cfg leaves it off.
-func Setup(cfg *config.Otel, version string, level slog.Leveler) (stop func(), err error) {
+// default logger's records at or above level to it. A nil cfg leaves it off
+// and returns a nil *Telemetry.
+func Setup(cfg *config.Otel, version string, level slog.Leveler) (*Telemetry, error) {
 	if cfg == nil {
-		return func() {}, nil
+		return nil, nil
 	}
 	ctx := context.Background()
 
@@ -83,20 +92,30 @@ func Setup(cfg *config.Otel, version string, level slog.Leveler) (stop func(), e
 	)))
 	slog.Info("opentelemetry configured", "endpoint", cfg.Endpoint)
 
-	stop = func() {
-		slog.SetDefault(console)
-		ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-		defer cancel()
-		err := errors.Join(
-			tracerProvider.Shutdown(ctx),
-			meterProvider.Shutdown(ctx),
-			loggerProvider.Shutdown(ctx),
-		)
-		if err != nil {
-			console.Error("failed to stop OpenTelemetry", "error", err)
-		}
+	return &Telemetry{
+		console:        console,
+		tracerProvider: tracerProvider,
+		meterProvider:  meterProvider,
+		loggerProvider: loggerProvider,
+	}, nil
+}
+
+// Stop flushes and shuts down OpenTelemetry.
+func (t *Telemetry) Stop() {
+	if t == nil {
+		return
 	}
-	return stop, nil
+	slog.SetDefault(t.console)
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	defer cancel()
+	err := errors.Join(
+		t.tracerProvider.Shutdown(ctx),
+		t.meterProvider.Shutdown(ctx),
+		t.loggerProvider.Shutdown(ctx),
+	)
+	if err != nil {
+		t.console.Error("failed to stop OpenTelemetry", "error", err)
+	}
 }
 
 // newResource describes this process; OTEL_* environment variables override it.
