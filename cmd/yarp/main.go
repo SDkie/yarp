@@ -20,37 +20,42 @@ import (
 var version = "0.1.0"
 
 func main() {
-	// run has already logged the error.
-	if err := run(); err != nil {
-		os.Exit(1)
-	}
-}
-
-// run starts yarp and blocks until it stops. Errors are logged where they
-// happen, before the deferred tel.Stop, so they are exported too.
-func run() error {
-	logLevel := new(slog.LevelVar)
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
-
 	configPath := flag.String("config", "yarp.yml", "path to the config file")
 	flag.Parse()
 
-	cfg, routes, err := loadConfig(*configPath)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, *configPath); err != nil {
+		os.Exit(1) // run has already logged it
+	}
+}
+
+// run starts yarp with the config file at configPath and blocks until ctx is
+// cancelled. Errors are logged before the deferred tel.Stop, so they are
+// exported too.
+func run(ctx context.Context, configPath string) error {
+	logLevel := new(slog.LevelVar)
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
+
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
 		return err
 	}
-	level, _ := cfg.Log.GetLevel() // validated by loadConfig
-	logLevel.Set(level)
-	slog.Info("config loaded", "path", *configPath, "entryPoints", len(cfg.EntryPoints),
-		"routesPath", cfg.Providers.File.Filename, "routes", len(routes.Routes))
+	logLevel.Set(slog.Level(cfg.Log.Level))
+	slog.Info("config loaded", "path", configPath, "entryPoints", len(cfg.EntryPoints),
+		"routesPath", cfg.Providers.File.Filename, "routes", len(cfg.Routes))
 
-	tel, err := telemetry.Setup(cfg.Otel, version, logLevel)
-	if err != nil {
-		slog.Error("failed to set up OpenTelemetry", "error", err)
-		return err
+	// tel stays nil when OpenTelemetry is not configured.
+	var tel *telemetry.Telemetry
+	if cfg.Otel != nil {
+		tel, err = telemetry.Setup(cfg.Otel, version, logLevel)
+		if err != nil {
+			slog.Error("failed to set up OpenTelemetry", "error", err)
+			return err
+		}
+		defer tel.Stop() // runs last, so every line before it is exported
 	}
-	defer tel.Stop() // runs last, so every line before it is exported
 
 	// c stays nil when the cache is disabled.
 	var c *cache.Cache
@@ -60,47 +65,27 @@ func run() error {
 			slog.Error("failed to open cache", "error", err)
 			return err
 		}
-		defer closeCache(c)
+		defer c.Close()
 	}
 	slog.Info("cache configured", "enabled", cfg.Cache.Enabled)
 
-	srv, err := server.New(cfg.EntryPoints, routes.Routes, c, tel)
-	if err != nil {
-		slog.Error("failed to build routers", "error", err)
-		return err
-	}
-	if err := srv.Listen(); err != nil {
-		slog.Error("failed to listen", "error", err)
-		return err
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := srv.Serve(ctx); err != nil {
-		slog.Error("yarp exited with error", "error", err)
+	if err := serve(ctx, cfg, c, tel); err != nil {
+		slog.Error("yarp failed", "error", err)
 		return err
 	}
 	slog.Info("yarp stopped")
 	return nil
 }
 
-// closeCache flushes and closes the cache.
-func closeCache(c *cache.Cache) {
-	if err := c.Close(); err != nil {
-		slog.Error("failed to close cache", "error", err)
-	}
-}
-
-// loadConfig loads and validates the config file at path, then the routes
-// from the configured provider.
-func loadConfig(path string) (*config.Config, *config.RoutesConfig, error) {
-	cfg, err := config.Load(path)
+// serve serves the entry points until ctx is cancelled. A nil c or tel
+// turns that layer off.
+func serve(ctx context.Context, cfg *config.Config, c *cache.Cache, tel *telemetry.Telemetry) error {
+	srv, err := server.New(cfg.EntryPoints, cfg.Routes, c, tel)
 	if err != nil {
-		return nil, nil, err
+		return fmt.Errorf("build server: %w", err)
 	}
-	routes, err := config.LoadRoutes(cfg.Providers.File.Filename, cfg.EntryPoints)
-	if err != nil {
-		return nil, nil, fmt.Errorf("file provider: %w", err)
+	if err := srv.Listen(); err != nil {
+		return err // it names the entry point and address
 	}
-	return cfg, routes, nil
+	return srv.Serve(ctx)
 }

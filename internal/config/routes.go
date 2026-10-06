@@ -11,8 +11,8 @@ import (
 	"strings"
 )
 
-// RoutesConfig is the routing configuration loaded by the file provider.
-type RoutesConfig struct {
+// routesFile is the routes file read by the file provider.
+type routesFile struct {
 	Routes map[string]Route `yaml:"routes"`
 }
 
@@ -34,40 +34,40 @@ type Server struct {
 	URL string `yaml:"url"`
 }
 
-// LoadRoutes reads and parses the routes file at path. Route entry points
+// loadRoutes reads and parses the routes file at path. Route entry points
 // are checked against entryPoints from the main config.
-func LoadRoutes(path string, entryPoints map[string]EntryPoint) (*RoutesConfig, error) {
+func loadRoutes(path string, entryPoints map[string]EntryPoint) (map[string]Route, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read routes %q: %w", path, err)
 	}
-	return ParseRoutes(data, entryPoints)
+	return parseRoutes(data, entryPoints)
 }
 
-// ParseRoutes decodes YAML routes data and validates it. Unknown fields and
+// parseRoutes decodes YAML routes data and validates it. Unknown fields and
 // duplicate keys are rejected.
-func ParseRoutes(data []byte, entryPoints map[string]EntryPoint) (*RoutesConfig, error) {
-	var rc RoutesConfig
-	if err := decodeStrict(data, &rc); err != nil {
+func parseRoutes(data []byte, entryPoints map[string]EntryPoint) (map[string]Route, error) {
+	var rf routesFile
+	if err := decodeStrict(data, &rf); err != nil {
 		return nil, fmt.Errorf("parse routes: %w", err)
 	}
-	if err := rc.validate(entryPoints); err != nil {
+	if err := rf.validate(entryPoints); err != nil {
 		return nil, fmt.Errorf("invalid routes: %w", err)
 	}
-	return &rc, nil
+	return rf.Routes, nil
 }
 
-func (rc *RoutesConfig) validate(entryPoints map[string]EntryPoint) error {
-	if len(rc.Routes) == 0 {
+func (rf *routesFile) validate(entryPoints map[string]EntryPoint) error {
+	if len(rf.Routes) == 0 {
 		return errors.New("routes is required and must define at least one route")
 	}
 	// Sorted so the reported error is the same on every run.
-	for _, name := range slices.Sorted(maps.Keys(rc.Routes)) {
-		r := rc.Routes[name]
+	for _, name := range slices.Sorted(maps.Keys(rf.Routes)) {
+		r := rf.Routes[name]
 		if err := r.validate(entryPoints); err != nil {
 			return fmt.Errorf("routes.%s: %w", name, err)
 		}
-		rc.Routes[name] = r
+		rf.Routes[name] = r
 	}
 	return nil
 }

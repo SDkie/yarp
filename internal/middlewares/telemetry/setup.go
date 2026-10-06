@@ -29,12 +29,8 @@ const (
 
 // Setup starts exporting this version of yarp's telemetry to the collector
 // in cfg and sets the otel globals. The default logger then also exports
-// records at or above level, until Stop. A nil cfg leaves it off and returns
-// a nil *Telemetry.
+// records at or above level, until Stop.
 func Setup(cfg *config.Otel, version string, level slog.Leveler) (*Telemetry, error) {
-	if cfg == nil {
-		return nil, nil
-	}
 	ctx := context.Background()
 
 	res, err := newResource(ctx, version)

@@ -1,4 +1,5 @@
-// Package config parses the yarp YAML configuration file.
+// Package config parses yarp's YAML configuration files: the config file
+// and the routes file it names.
 package config
 
 import (
@@ -23,6 +24,8 @@ type Config struct {
 	Log         Log                   `yaml:"log"`
 	// Otel is nil when OpenTelemetry is not configured.
 	Otel *Otel `yaml:"otel"`
+	// Routes is read from the file provider, not from the config file.
+	Routes map[string]Route `yaml:"-"`
 }
 
 // EntryPoint is a named network address yarp listens on.
@@ -44,23 +47,29 @@ type Cache struct {
 
 // Log configures yarp's logs.
 type Log struct {
-	// Level is DEBUG, INFO, WARN or ERROR, in any case. It defaults to ERROR.
-	Level string `yaml:"level"`
+	// Level defaults to ERROR.
+	Level Level `yaml:"level"`
 }
 
-// GetLevel returns the slog level named by l.Level.
-func (l Log) GetLevel() (slog.Level, error) {
-	switch strings.ToUpper(l.Level) {
+// Level is a log level, written as DEBUG, INFO, WARN or ERROR, in any case.
+type Level slog.Level
+
+// UnmarshalText reads a level by name, so a bad one fails naming the
+// accepted ones.
+func (l *Level) UnmarshalText(text []byte) error {
+	switch strings.ToUpper(string(text)) {
 	case "DEBUG":
-		return slog.LevelDebug, nil
+		*l = Level(slog.LevelDebug)
 	case "INFO":
-		return slog.LevelInfo, nil
+		*l = Level(slog.LevelInfo)
 	case "WARN":
-		return slog.LevelWarn, nil
+		*l = Level(slog.LevelWarn)
 	case "ERROR":
-		return slog.LevelError, nil
+		*l = Level(slog.LevelError)
+	default:
+		return fmt.Errorf("log.level %q is invalid, expected DEBUG, INFO, WARN or ERROR", text)
 	}
-	return 0, fmt.Errorf("log.level %q is invalid, expected DEBUG, INFO, WARN or ERROR", l.Level)
+	return nil
 }
 
 // Otel configures sending telemetry to an OpenTelemetry collector. Other
@@ -75,22 +84,31 @@ type FileProvider struct {
 	Filename string `yaml:"filename"`
 }
 
-// Load reads and parses the config file at path.
+// Load reads and validates the config file at path, then the routes file
+// named by its file provider.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config %q: %w", path, err)
 	}
-	return Parse(data)
+	cfg, err := parse(data)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Routes, err = loadRoutes(cfg.Providers.File.Filename, cfg.EntryPoints)
+	if err != nil {
+		return nil, fmt.Errorf("file provider: %w", err)
+	}
+	return cfg, nil
 }
 
-// Parse decodes YAML config data and validates it. Unknown fields and
+// parse decodes YAML config data and validates it. Unknown fields and
 // duplicate keys are rejected.
-func Parse(data []byte) (*Config, error) {
+func parse(data []byte) (*Config, error) {
 	// Defaults for omitted fields.
 	cfg := Config{
 		Cache: Cache{Enabled: true},
-		Log:   Log{Level: "ERROR"},
+		Log:   Log{Level: Level(slog.LevelError)},
 	}
 	if err := decodeStrict(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
@@ -124,10 +142,6 @@ func (c *Config) validate() error {
 	}
 	if c.Providers.File.Filename == "" {
 		return errors.New("providers.file.filename is required")
-	}
-
-	if _, err := c.Log.GetLevel(); err != nil {
-		return err
 	}
 
 	if c.Otel != nil {

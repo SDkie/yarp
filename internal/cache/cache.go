@@ -4,6 +4,7 @@ package cache
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
@@ -79,5 +80,10 @@ func (c *Cache) Delete(key string) error {
 
 // Close flushes pending writes and releases the store.
 func (c *Cache) Close() error {
-	return c.db.Close()
+	err := c.db.Close()
+	if err != nil {
+		slog.Error("failed to close cache", "error", err)
+	}
+
+	return err
 }
