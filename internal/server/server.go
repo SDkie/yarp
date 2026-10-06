@@ -41,8 +41,8 @@ type entryPoint struct {
 
 // New builds the router of every entry point (see router.Build) and the
 // HTTP server that serves it.
-func New(entryPoints map[string]config.EntryPoint, routes map[string]config.Route, c *cache.Cache, tel *telemetry.Telemetry) (*Server, error) {
-	handlers, err := router.Build(entryPoints, routes, c, tel)
+func New(entryPoints map[string]config.EntryPoint, routes map[string]config.Route, cache *cache.Cache, tel *telemetry.Telemetry) (*Server, error) {
+	handlers, err := router.Build(entryPoints, routes, cache, tel)
 	if err != nil {
 		return nil, err
 	}

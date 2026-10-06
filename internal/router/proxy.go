@@ -1,7 +1,6 @@
 package router
 
 import (
-	"fmt"
 	"net/http"
 	"net/url"
 
@@ -13,14 +12,10 @@ import (
 // them round-robin. The request path is appended to the server's base path,
 // the query is merged with the server's query, and the original Host header
 // is kept.
-func newProxy(route string, servers []config.Server, transport http.RoundTripper) (http.Handler, error) {
+func newProxy(route string, servers []config.Server, transport http.RoundTripper) http.Handler {
 	targets := make([]*url.URL, len(servers))
 	for i, s := range servers {
-		u, err := url.Parse(s.URL)
-		if err != nil {
-			return nil, fmt.Errorf("route %q: server %q: %w", route, s.URL, err)
-		}
-		targets[i] = u
+		targets[i], _ = url.Parse(s.URL) // validated by the config
 	}
-	return proxy.New(route, targets, transport), nil
+	return proxy.New(route, targets, transport)
 }

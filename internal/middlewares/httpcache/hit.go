@@ -13,12 +13,12 @@ import (
 func (h *handler) lookup(r *http.Request) *record {
 	varyKey, varyPlain := getVaryKey(r.Method, r)
 	var vary varyRecord
-	if !load(r.Context(), h.c, varyKey, &vary) || vary.Key != varyPlain {
+	if !load(r.Context(), h.s, varyKey, &vary) || vary.Key != varyPlain {
 		return nil
 	}
 	respKey, respPlain := getRespKey(r, vary.Names)
 	var e record
-	if !load(r.Context(), h.c, respKey, &e) || e.Key != respPlain || !time.Now().Before(e.ExpiresAt) {
+	if !load(r.Context(), h.s, respKey, &e) || e.Key != respPlain || !time.Now().Before(e.ExpiresAt) {
 		return nil
 	}
 	return &e

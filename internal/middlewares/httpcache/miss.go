@@ -50,8 +50,8 @@ func (h *handler) save(r *http.Request, rec *recorder, generatedAt, expiresAt ti
 
 	go func() {
 		// The response first, so the Vary record never points to nothing.
-		if store(ctx, h.c, respKey, e, ttl) {
-			store(ctx, h.c, varyKey, vary, ttl)
+		if store(ctx, h.s, respKey, e, ttl) {
+			store(ctx, h.s, varyKey, vary, ttl)
 		}
 	}()
 }

@@ -44,8 +44,8 @@ type varyRecord struct {
 
 // load decodes the value stored under key into v. Missing keys and read or
 // decode failures (which are logged) report false.
-func load(ctx context.Context, c Store, key string, v any) bool {
-	data, found, err := c.Get(key)
+func load(ctx context.Context, s Store, key string, v any) bool {
+	data, found, err := s.Get(key)
 	if err != nil {
 		slog.ErrorContext(ctx, "cache read failed", "key", key, "error", err)
 		return false
@@ -63,13 +63,13 @@ func load(ctx context.Context, c Store, key string, v any) bool {
 // store saves v under key until ttl passes and reports whether it was saved.
 // Failures are logged; the response has already been sent, so they never
 // affect the client.
-func store(ctx context.Context, c Store, key string, v any, ttl time.Duration) bool {
+func store(ctx context.Context, s Store, key string, v any, ttl time.Duration) bool {
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(v); err != nil {
 		slog.ErrorContext(ctx, "cache encode failed", "key", key, "error", err)
 		return false
 	}
-	if err := c.Set(key, buf.Bytes(), ttl); err != nil {
+	if err := s.Set(key, buf.Bytes(), ttl); err != nil {
 		slog.ErrorContext(ctx, "cache write failed", "key", key, "error", err)
 		return false
 	}

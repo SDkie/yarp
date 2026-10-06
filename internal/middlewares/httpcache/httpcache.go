@@ -22,16 +22,16 @@ const (
 )
 
 // New returns next wrapped with the HTTP cache: responses to GET and HEAD
-// are stored in c and reused while fresh, following the rules in the
-// package doc. c must not be nil; each request's cache result is recorded
+// are stored in s and reused while fresh, following the rules in the
+// package doc. s must not be nil; each request's cache result is recorded
 // in tel.
-func New(c Store, tel *telemetry.Telemetry, next http.Handler) http.Handler {
-	return &handler{c: c, tel: tel, next: next}
+func New(s Store, tel *telemetry.Telemetry, next http.Handler) http.Handler {
+	return &handler{s: s, tel: tel, next: next}
 }
 
 // handler is the middleware returned by New.
 type handler struct {
-	c    Store
+	s    Store
 	tel  *telemetry.Telemetry
 	next http.Handler
 }
@@ -80,7 +80,7 @@ func (h *handler) serveUnsafe(w http.ResponseWriter, r *http.Request) {
 func (h *handler) invalidate(r *http.Request) {
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		key, plain := getVaryKey(method, r)
-		if err := h.c.Delete(key); err != nil {
+		if err := h.s.Delete(key); err != nil {
 			slog.ErrorContext(r.Context(), "cache invalidation failed", "key", plain, "error", err)
 		}
 	}

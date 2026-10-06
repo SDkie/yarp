@@ -35,7 +35,7 @@ func TestSave(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			s := newMemStore()
-			h := &handler{c: s}
+			h := &handler{s: s}
 			r := newRequest()
 			generatedAt, expiresAt := time.Now(), time.Now().Add(time.Minute)
 
@@ -67,7 +67,7 @@ func TestSave(t *testing.T) {
 			s.failSetPrefix = respPrefix
 			r := newRequest()
 
-			(&handler{c: s}).save(r, recorded(), time.Now(), time.Now().Add(time.Minute))
+			(&handler{s: s}).save(r, recorded(), time.Now(), time.Now().Add(time.Minute))
 			synctest.Wait()
 
 			respKey, _ := getRespKey(r, []string{"Accept-Encoding"})
@@ -85,7 +85,7 @@ func TestSave(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			s := newMemStore()
-			(&handler{c: s}).save(newRequest(), recorded(), time.Now().Add(-time.Minute), time.Now())
+			(&handler{s: s}).save(newRequest(), recorded(), time.Now().Add(-time.Minute), time.Now())
 			synctest.Wait()
 
 			if len(s.setKeys) != 0 {
