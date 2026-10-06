@@ -20,7 +20,7 @@ type routesFile struct {
 // EntryPoints, to one of Servers. At least one of Host or PathPrefix is set.
 type Route struct {
 	// Host is an exact host ("example.com") or a single-level wildcard
-	// ("*.example.com"). Stored in lowercase.
+	// ("*.example.com"), in any case.
 	Host string `yaml:"host"`
 	// PathPrefix matches whole path segments: "/api" matches /api and
 	// /api/users but not /apix.
@@ -31,7 +31,26 @@ type Route struct {
 
 // Server is a backend that requests are forwarded to.
 type Server struct {
-	URL string `yaml:"url"`
+	URL URL `yaml:"url"`
+}
+
+// URL is a URL parsed when the routes file is read. Its URL is nil when the
+// url key is missing or empty.
+type URL struct {
+	*url.URL
+}
+
+// UnmarshalText parses text as a URL.
+func (u *URL) UnmarshalText(text []byte) error {
+	if len(text) == 0 {
+		return nil
+	}
+	parsed, err := url.Parse(string(text))
+	if err != nil {
+		return err
+	}
+	u.URL = parsed
+	return nil
 }
 
 // loadRoutes reads and parses the routes file at path. Route entry points
@@ -57,28 +76,25 @@ func parseRoutes(data []byte, entryPoints map[string]EntryPoint) (map[string]Rou
 	return rf.Routes, nil
 }
 
-func (rf *routesFile) validate(entryPoints map[string]EntryPoint) error {
+func (rf routesFile) validate(entryPoints map[string]EntryPoint) error {
 	if len(rf.Routes) == 0 {
 		return errors.New("routes is required and must define at least one route")
 	}
 	// Sorted so the reported error is the same on every run.
 	for _, name := range slices.Sorted(maps.Keys(rf.Routes)) {
-		r := rf.Routes[name]
-		if err := r.validate(entryPoints); err != nil {
+		if err := rf.Routes[name].validate(entryPoints); err != nil {
 			return fmt.Errorf("routes.%s: %w", name, err)
 		}
-		rf.Routes[name] = r
 	}
 	return nil
 }
 
-// validate checks the route and normalizes Host to lowercase.
-func (r *Route) validate(entryPoints map[string]EntryPoint) error {
+// validate checks the route.
+func (r Route) validate(entryPoints map[string]EntryPoint) error {
 	if r.Host == "" && r.PathPrefix == "" {
 		return errors.New("one of host or pathPrefix is required")
 	}
 	if r.Host != "" {
-		r.Host = strings.ToLower(r.Host)
 		if err := validateHost(r.Host); err != nil {
 			return fmt.Errorf("host %q: %w", r.Host, err)
 		}
@@ -108,13 +124,16 @@ func (r *Route) validate(entryPoints map[string]EntryPoint) error {
 	}
 	seenURL := make(map[string]bool, len(r.Servers))
 	for i, s := range r.Servers {
-		if err := validateServerURL(s.URL); err != nil {
+		if s.URL.URL == nil {
+			return fmt.Errorf("servers[%d].url is required", i)
+		}
+		if err := validateServerURL(s.URL.URL); err != nil {
 			return fmt.Errorf("servers[%d].url %q: %w", i, s.URL, err)
 		}
-		if seenURL[s.URL] {
+		if seenURL[s.URL.String()] {
 			return fmt.Errorf("servers[%d].url %q is listed more than once", i, s.URL)
 		}
-		seenURL[s.URL] = true
+		seenURL[s.URL.String()] = true
 	}
 	return nil
 }
@@ -143,14 +162,7 @@ func validatePathPrefix(prefix string) error {
 	return nil
 }
 
-func validateServerURL(raw string) error {
-	if raw == "" {
-		return errors.New("is required")
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return err
-	}
+func validateServerURL(u *url.URL) error {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return errors.New("scheme must be http or https")
 	}

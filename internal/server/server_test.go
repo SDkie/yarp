@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,16 @@ func newBackend(t *testing.T, h http.HandlerFunc) string {
 	return backend.URL
 }
 
+// serverURL returns rawURL as a config.URL.
+func serverURL(t *testing.T, rawURL string) config.URL {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse %q: %v", rawURL, err)
+	}
+	return config.URL{URL: u}
+}
+
 // echoPath answers with "backend " and the request path.
 func echoPath(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "backend "+r.URL.Path)
@@ -41,7 +52,7 @@ func newServer(t *testing.T, eps map[string]config.EntryPoint, backendURL string
 		"hello": {
 			PathPrefix:  "/hello",
 			EntryPoints: []string{"web"},
-			Servers:     []config.Server{{URL: backendURL}},
+			Servers:     []config.Server{{URL: serverURL(t, backendURL)}},
 		},
 	}
 	s, err := New(eps, routes, nil, nil)
@@ -96,16 +107,16 @@ func (sv *serving) stop(t *testing.T) error {
 	return sv.wait(t)
 }
 
-func get(t *testing.T, url string) (status int, body string) {
+func get(t *testing.T, rawURL string) (status int, body string) {
 	t.Helper()
-	resp, err := client.Get(url)
+	resp, err := client.Get(rawURL)
 	if err != nil {
-		t.Fatalf("GET %s: %v", url, err)
+		t.Fatalf("GET %s: %v", rawURL, err)
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("GET %s: read body: %v", url, err)
+		t.Fatalf("GET %s: read body: %v", rawURL, err)
 	}
 	return resp.StatusCode, string(b)
 }
@@ -333,7 +344,7 @@ func TestNewRouteConflict(t *testing.T) {
 	route := config.Route{
 		PathPrefix:  "/hello",
 		EntryPoints: []string{"web"},
-		Servers:     []config.Server{{URL: backendURL}},
+		Servers:     []config.Server{{URL: serverURL(t, backendURL)}},
 	}
 	_, err := New(map[string]config.EntryPoint{"web": {Address: "127.0.0.1:0"}},
 		map[string]config.Route{"one": route, "two": route}, nil, nil)

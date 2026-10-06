@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -81,6 +84,7 @@ type Otel struct {
 
 // FileProvider loads the routing configuration from a file.
 type FileProvider struct {
+	// Filename is an absolute path, or one relative to the config file.
 	Filename string `yaml:"filename"`
 }
 
@@ -94,6 +98,10 @@ func Load(path string) (*Config, error) {
 	cfg, err := parse(data)
 	if err != nil {
 		return nil, err
+	}
+	// A relative routes path is relative to the config file, not the working directory.
+	if !filepath.IsAbs(cfg.Providers.File.Filename) {
+		cfg.Providers.File.Filename = filepath.Join(filepath.Dir(path), cfg.Providers.File.Filename)
 	}
 	cfg.Routes, err = loadRoutes(cfg.Providers.File.Filename, cfg.EntryPoints)
 	if err != nil {
@@ -124,7 +132,9 @@ func (c *Config) validate() error {
 	if len(c.EntryPoints) == 0 {
 		return errors.New("entryPoints is required and must define at least one entry point")
 	}
-	for name, ep := range c.EntryPoints {
+	// Sorted so the reported error is the same on every run.
+	for _, name := range slices.Sorted(maps.Keys(c.EntryPoints)) {
+		ep := c.EntryPoints[name]
 		if ep.Address == "" {
 			return fmt.Errorf("entryPoints.%s.address is required", name)
 		}

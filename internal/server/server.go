@@ -43,12 +43,12 @@ type entryPoint struct {
 }
 
 // New builds the handler of every entry point (see newHandlers) and the
-// HTTP server that serves it. A nil cache or tel turns that layer off.
-func New(entryPoints map[string]config.EntryPoint, routes map[string]config.Route, cache *cache.Cache, tel *telemetry.Telemetry) (*Server, error) {
+// HTTP server that serves it. A nil c or tel turns that layer off.
+func New(entryPoints map[string]config.EntryPoint, routes map[string]config.Route, c *cache.Cache, tel *telemetry.Telemetry) (*Server, error) {
 	// A nil *cache.Cache must become a nil Store, not a Store holding nil.
 	var store httpcache.Store
-	if cache != nil {
-		store = cache
+	if c != nil {
+		store = c
 	}
 	handlers, err := newHandlers(entryPoints, routes, newTransport(), store, tel)
 	if err != nil {
@@ -88,11 +88,7 @@ func newHandlers(
 		if tel != nil {
 			transport = tel.Transport(name, transport)
 		}
-		servers, err := serverURLs(cfg.Servers)
-		if err != nil {
-			return nil, fmt.Errorf("route %q: %w", name, err)
-		}
-		var h http.Handler = proxy.New(name, servers, transport)
+		var h http.Handler = proxy.New(name, serverURLs(cfg.Servers), transport)
 		// Outside the proxy, so a hit never reaches the backend.
 		if store != nil {
 			h = httpcache.Handler(store, h)
@@ -121,17 +117,13 @@ func newHandlers(
 	return handlers, nil
 }
 
-// serverURLs parses the URLs of servers.
-func serverURLs(servers []config.Server) ([]*url.URL, error) {
+// serverURLs returns the URLs of servers.
+func serverURLs(servers []config.Server) []*url.URL {
 	urls := make([]*url.URL, len(servers))
 	for i, s := range servers {
-		u, err := url.Parse(s.URL) // its error names the URL
-		if err != nil {
-			return nil, err
-		}
-		urls[i] = u
+		urls[i] = s.URL.URL
 	}
-	return urls, nil
+	return urls
 }
 
 // Listen opens the address of every entry point, so none serves unless all

@@ -28,7 +28,7 @@ func (h *handler) serveMiss(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// save stores the response recorded for r until expiresAt, writing it in a new goroutine
+// save stores the response recorded for r until expiresAt, writing it in a new goroutine.
 func (h *handler) save(r *http.Request, rec *recorder, generatedAt, expiresAt time.Time) {
 	ttl := time.Until(expiresAt)
 	if ttl <= 0 {
