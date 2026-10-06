@@ -134,5 +134,8 @@ func (ep *entryPoint) serve(ctx context.Context) error {
 	if err := ep.srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("entrypoint %q: shutdown: %w", ep.name, err)
 	}
+	// Wait for Serve to return: if it had not started when Shutdown ran, the
+	// listener is only closed then.
+	<-errCh
 	return nil
 }

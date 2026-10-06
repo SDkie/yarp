@@ -67,6 +67,8 @@ func newRouter(entryPoint string, routes []route) (*Router, error) {
 	return &Router{entryPoint: entryPoint, routes: routes}, nil
 }
 
+// ServeHTTP sends r to the most specific matching route, or answers 404,
+// then writes the access log line.
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	matched, ok := rt.match(r)
