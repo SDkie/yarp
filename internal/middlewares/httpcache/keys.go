@@ -86,13 +86,16 @@ func getHashKey(prefix, plain string) string {
 }
 
 // normalizeValues joins header field lines into one comma-separated value
-// with the spaces around each element removed, so equivalent requests (RFC
-// 9111 section 4.1) produce the same key.
+// with the spaces around each element and empty elements removed (RFC 9110
+// section 5.6.1), so equivalent requests (RFC 9111 section 4.1) produce the
+// same key.
 func normalizeValues(values []string) string {
 	var parts []string
 	for _, v := range values {
 		for part := range strings.SplitSeq(v, ",") {
-			parts = append(parts, strings.TrimSpace(part))
+			if part = strings.TrimSpace(part); part != "" {
+				parts = append(parts, part)
+			}
 		}
 	}
 	return strings.Join(parts, ",")
