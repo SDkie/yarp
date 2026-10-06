@@ -8,8 +8,8 @@ import (
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 )
 
-// newLogHandler returns a slog handler that sends records at or above level
-// to lp.
+// newLogHandler returns a slog handler that exports records at or above
+// level to lp.
 func newLogHandler(lp *sdklog.LoggerProvider, level slog.Leveler) slog.Handler {
 	return levelHandler{
 		Handler: otelslog.NewHandler(scopeName, otelslog.WithLoggerProvider(lp)),

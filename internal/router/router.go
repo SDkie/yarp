@@ -113,8 +113,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return route.matchHost(host) && route.matchPath(r.URL.Path)
 	}); i >= 0 {
 		routeName = rt.routes[i].name
-		// w as received, since SetRoute needs telemetry's own writer.
-		telemetry.SetRoute(w, routeName)
+		telemetry.SetRoute(r.Context(), routeName)
 		rt.routes[i].handler.ServeHTTP(w, r)
 	} else {
 		slog.ErrorContext(r.Context(), "no matching route", "entrypoint", rt.entryPoint, "method", r.Method, "host", r.Host, "path", r.URL.Path)
