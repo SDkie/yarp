@@ -105,7 +105,7 @@ type cacheTest struct {
 
 func newCacheTest(t *testing.T, backend http.HandlerFunc) *cacheTest {
 	ct := &cacheTest{t: t, store: newMemStore(), backend: backend}
-	ct.h = New(ct.store, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ct.h = Handler(ct.store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ct.calls++
 		ct.backend(w, r)
 	}))
@@ -692,7 +692,7 @@ func TestAbortedResponseNotStored(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := newMemStore()
 		calls := 0
-		h := New(store, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := Handler(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			calls++
 			// What the proxy does when the backend fails mid-body.
 			w.Header().Set("Cache-Control", "max-age=60")

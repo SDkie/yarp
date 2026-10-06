@@ -15,12 +15,9 @@ import (
 )
 
 // Handler returns next wrapped so each request received on entryPoint gets a
-// span and metrics, or next itself when telemetry is off. next reports the
-// matched route with SetRoute.
+// span and metrics; t must not be nil. next reports the matched route with
+// SetRoute.
 func (t *Telemetry) Handler(entryPoint string, next http.Handler) http.Handler {
-	if t == nil {
-		return next
-	}
 	return &handler{tel: t, next: next, entryPoint: entryPointKey.String(entryPoint)}
 }
 
@@ -45,40 +42,48 @@ type serverRequest struct {
 	start  time.Time
 	method httpconv.RequestMethodAttr
 	span   trace.Span
-	route  *string // set by SetRoute
+	info   *requestInfo // filled in by the handlers inside
 }
 
 // startRequest starts the span, counts the request as active and returns
 // the context to serve it with.
 func (h *handler) startRequest(r *http.Request) (context.Context, serverRequest) {
-	req := serverRequest{start: time.Now(), method: getMethodAttr(r.Method), route: new(string)}
+	req := serverRequest{start: time.Now(), method: getMethodAttr(r.Method), info: &requestInfo{}}
 	ctx, span := h.tel.startServerSpan(r, req.method, h.entryPoint)
 	req.span = span
-	ctx = context.WithValue(ctx, routeCtxKey{}, req.route)
+	ctx = context.WithValue(ctx, infoCtxKey{}, req.info)
 	h.tel.metrics.serverActive.Add(ctx, 1, req.method, scheme, h.entryPoint)
 	return ctx, req
 }
 
-// endRequest ends the span and records the request's duration. It takes rw,
-// not its status, since a deferred call evaluates its arguments early.
+// endRequest records the cache result, ends the span and records the
+// request's duration. It takes rw, not its status, since a deferred call
+// evaluates its arguments early.
 func (h *handler) endRequest(ctx context.Context, req serverRequest, rw *responseWriter) {
-	endServerSpan(req.span, rw.status, *req.route)
+	h.tel.recordCacheResult(ctx, req.span, req.info.cacheResult)
+	endServerSpan(req.span, rw.status, req.info.route)
 	h.tel.metrics.serverActive.Add(ctx, -1, req.method, scheme, h.entryPoint)
-	attrs := []attribute.KeyValue{h.entryPoint, routeKey.String(*req.route)}
+	attrs := []attribute.KeyValue{h.entryPoint, routeKey.String(req.info.route)}
 	if rw.status > 0 {
 		attrs = append(attrs, h.tel.metrics.serverDuration.AttrResponseStatusCode(rw.status))
 	}
 	h.tel.metrics.serverDuration.Record(ctx, time.Since(req.start).Seconds(), req.method, scheme, attrs...)
 }
 
-// routeCtxKey holds the *string that SetRoute writes the route to.
-type routeCtxKey struct{}
+// requestInfo is what the handlers inside report about a request.
+type requestInfo struct {
+	route       string // set by SetRoute
+	cacheResult string // set by SetCacheResult
+}
+
+// infoCtxKey holds the request's *requestInfo.
+type infoCtxKey struct{}
 
 // SetRoute records the route that serves the request with context ctx. It
 // does nothing when telemetry is off.
 func SetRoute(ctx context.Context, route string) {
-	if p, ok := ctx.Value(routeCtxKey{}).(*string); ok {
-		*p = route
+	if info, ok := ctx.Value(infoCtxKey{}).(*requestInfo); ok {
+		info.route = route
 	}
 }
 

@@ -15,13 +15,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Transport returns rt wrapped so each request it sends to a backend of
-// route gets a span and metrics, or rt itself when telemetry is off.
-func (t *Telemetry) Transport(rt http.RoundTripper, route string) http.RoundTripper {
-	if t == nil {
-		return rt
-	}
-	return &transport{tel: t, next: rt, route: routeKey.String(route)}
+// Transport returns next wrapped so each request it sends to a backend of
+// route gets a span and metrics; t must not be nil.
+func (t *Telemetry) Transport(route string, next http.RoundTripper) http.RoundTripper {
+	return &transport{tel: t, next: next, route: routeKey.String(route)}
 }
 
 // transport records a span and metrics for each request sent to a backend

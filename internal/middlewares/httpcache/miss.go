@@ -4,12 +4,14 @@ import (
 	"context"
 	"net/http"
 	"time"
+
+	"github.com/SDkie/yarp/internal/middlewares/telemetry"
 )
 
 // serveMiss forwards r and, when the response may be reused, stores it in
 // the background so the client never waits for the write.
 func (h *handler) serveMiss(w http.ResponseWriter, r *http.Request) {
-	h.tel.RecordCacheResult(r.Context(), cacheResultMiss)
+	telemetry.SetCacheResult(r.Context(), cacheResultMiss)
 	requestTime := time.Now()
 	var generatedAt, expiresAt time.Time
 	rec := &recorder{ResponseWriter: w, cacheStatus: cacheStatusMiss}

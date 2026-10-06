@@ -1,16 +1,14 @@
-// Package router matches incoming requests to the configured routes.
+// Package router matches incoming requests to routes.
 package router
 
 import (
+	"cmp"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net/http"
 	"slices"
 	"time"
 
-	"github.com/SDkie/yarp/internal/cache"
-	"github.com/SDkie/yarp/internal/config"
 	"github.com/SDkie/yarp/internal/middlewares/telemetry"
 )
 
@@ -18,53 +16,33 @@ import (
 // the most specific matching route, or answers 404 when none matches.
 type Router struct {
 	entryPoint string
-	// routes is sorted most specific first, so the first match wins.
-	routes []route
+	// routes holds normalized copies (see New), sorted most specific first so
+	// the first match wins.
+	routes []Route
 }
 
-// Build returns one handler per entry point, serving the routes that list
-// that entry point. Entry points without routes answer 404 to every request.
-// It fails if two routes on the same entry point have the same host and
-// pathPrefix, since only one of them could ever match. All routes share one
-// backend transport, so they reuse the same connection pool. Responses are
-// cached in cache; a nil cache disables caching. Requests are traced and measured
-// with tel; a nil tel disables that.
-func Build(entryPoints map[string]config.EntryPoint, routes map[string]config.Route, cache *cache.Cache, tel *telemetry.Telemetry) (map[string]http.Handler, error) {
-	transport := newTransport()
-	byEntryPoint := make(map[string][]route, len(entryPoints))
-	for _, name := range slices.Sorted(maps.Keys(routes)) {
-		cfg := routes[name]
-		rt := newRoute(name, cfg, transport, cache, tel)
-		for _, ep := range cfg.EntryPoints {
-			byEntryPoint[ep] = append(byEntryPoint[ep], rt)
-		}
-	}
-
-	handlers := make(map[string]http.Handler, len(entryPoints))
-	for ep := range entryPoints {
-		router, err := newRouter(ep, byEntryPoint[ep])
-		if err != nil {
-			return nil, err
-		}
-		handlers[ep] = tel.Handler(ep, router)
-	}
-	return handlers, nil
-}
-
-// newRouter returns the router for entryPoint with routes sorted most
-// specific first. It fails if two routes have the same host and pathPrefix.
-func newRouter(entryPoint string, routes []route) (*Router, error) {
+// New returns the router for entryPoint, trying routes most specific first;
+// with no routes, every request gets 404. It fails if two routes have the
+// same host and pathPrefix, since only one of them could ever match.
+func New(entryPoint string, routes []Route) (*Router, error) {
 	if len(routes) == 0 {
 		slog.Error("entry point has no routes, every request gets 404", "entrypoint", entryPoint)
 	}
-	slices.SortFunc(routes, compareSpecificity)
-	for i := 1; i < len(routes); i++ {
-		if routes[i-1].host == routes[i].host && routes[i-1].pathPrefix == routes[i].pathPrefix {
+	// Normalized copies, so matching compares hosts and paths directly.
+	rs := make([]Route, len(routes))
+	for i, r := range routes {
+		r.Host = normalizeHost(r.Host)
+		r.PathPrefix = cmp.Or(r.PathPrefix, "/")
+		rs[i] = r
+	}
+	slices.SortFunc(rs, compareSpecificity)
+	for i := 1; i < len(rs); i++ {
+		if rs[i-1].Host == rs[i].Host && rs[i-1].PathPrefix == rs[i].PathPrefix {
 			return nil, fmt.Errorf("entry point %q: routes %q and %q have the same host and pathPrefix",
-				entryPoint, routes[i-1].name, routes[i].name)
+				entryPoint, rs[i-1].Name, rs[i].Name)
 		}
 	}
-	return &Router{entryPoint: entryPoint, routes: routes}, nil
+	return &Router{entryPoint: entryPoint, routes: rs}, nil
 }
 
 // ServeHTTP sends r to the most specific matching route, or answers 404,
@@ -73,24 +51,24 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	matched, ok := rt.match(r)
 	if ok {
-		telemetry.SetRoute(r.Context(), matched.name)
-		matched.handler.ServeHTTP(w, r)
+		telemetry.SetRoute(r.Context(), matched.Name)
+		matched.Handler.ServeHTTP(w, r)
 	} else {
 		slog.ErrorContext(r.Context(), "no matching route", "entrypoint", rt.entryPoint, "method", r.Method, "host", r.Host, "path", r.URL.Path)
 		http.Error(w, "no matching route", http.StatusNotFound)
 	}
-	rt.logRequest(r, matched.name, start)
+	rt.logRequest(r, matched.Name, start)
 }
 
 // match returns the most specific route for r, or false when none matches.
-func (rt *Router) match(r *http.Request) (route, bool) {
+func (rt *Router) match(r *http.Request) (Route, bool) {
 	host := requestHost(r)
 	for _, candidate := range rt.routes {
 		if candidate.matchHost(host) && candidate.matchPath(r.URL.Path) {
 			return candidate, true
 		}
 	}
-	return route{}, false
+	return Route{}, false
 }
 
 // logRequest writes the access log line for r, served by routeName since

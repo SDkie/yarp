@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/SDkie/yarp/internal/middlewares/telemetry"
 )
 
 // lookup returns the stored response for r while it is fresh, or nil. A
@@ -27,7 +29,7 @@ func (h *handler) lookup(r *http.Request) *record {
 // serveHit answers r from the stored response e, with a 304 when r's
 // conditions allow it.
 func (h *handler) serveHit(w http.ResponseWriter, r *http.Request, e *record) {
-	h.tel.RecordCacheResult(r.Context(), cacheResultHit)
+	telemetry.SetCacheResult(r.Context(), cacheResultHit)
 	if isNotModified(r, e) {
 		writeNotModified(w, e)
 		return

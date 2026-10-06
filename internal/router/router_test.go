@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/SDkie/yarp/internal/config"
 )
 
 // named returns a handler that answers with name, standing in for a route's
@@ -29,10 +27,10 @@ func serve(h http.Handler, url string) *httptest.ResponseRecorder {
 	return rec
 }
 
-func routeNames(routes []route) []string {
+func routeNames(routes []Route) []string {
 	names := make([]string, len(routes))
 	for i, r := range routes {
-		names[i] = r.name
+		names[i] = r.Name
 	}
 	return names
 }
@@ -45,37 +43,53 @@ func setDefaultLogger(t *testing.T, h slog.Handler) {
 	t.Cleanup(func() { slog.SetDefault(old) })
 }
 
-// TestNewRouter checks that routes are sorted and duplicates rejected.
-func TestNewRouter(t *testing.T) {
+// TestNew checks that routes are sorted most specific first and duplicates rejected.
+func TestNew(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name      string
-		routes    []route
+		routes    []Route
 		wantOrder []string
 		wantErr   bool
 	}{
 		{
 			name: "sorted most specific first",
-			routes: []route{
-				{name: "any", pathPrefix: "/"},
-				{name: "exact", host: "a.com", pathPrefix: "/"},
-				{name: "wildcard", host: "*.a.com", pathPrefix: "/"},
+			routes: []Route{
+				{Name: "any"},
+				{Name: "exact", Host: "a.com"},
+				{Name: "wildcard", Host: "*.a.com"},
 			},
 			wantOrder: []string{"exact", "wildcard", "any"},
 		},
 		{
 			name: "same pathPrefix, different hosts",
-			routes: []route{
-				{name: "a", host: "a.com", pathPrefix: "/x"},
-				{name: "b", host: "b.com", pathPrefix: "/x"},
+			routes: []Route{
+				{Name: "a", Host: "a.com", PathPrefix: "/x"},
+				{Name: "b", Host: "b.com", PathPrefix: "/x"},
 			},
 			wantOrder: []string{"a", "b"},
 		},
 		{
 			name: "same host and pathPrefix",
-			routes: []route{
-				{name: "a", host: "a.com", pathPrefix: "/x"},
-				{name: "b", host: "a.com", pathPrefix: "/x"},
+			routes: []Route{
+				{Name: "a", Host: "a.com", PathPrefix: "/x"},
+				{Name: "b", Host: "a.com", PathPrefix: "/x"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "same host in other case",
+			routes: []Route{
+				{Name: "a", Host: "X.com", PathPrefix: "/x"},
+				{Name: "b", Host: "x.com", PathPrefix: "/x"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty and root pathPrefix are the same",
+			routes: []Route{
+				{Name: "a", Host: "a.com"},
+				{Name: "b", Host: "a.com", PathPrefix: "/"},
 			},
 			wantErr: true,
 		},
@@ -86,9 +100,9 @@ func TestNewRouter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rt, err := newRouter("web", tt.routes)
+			rt, err := New("web", tt.routes)
 			if (err != nil) != tt.wantErr {
-				t.Fatalf("newRouter error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("New error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if err != nil {
 				return
@@ -100,16 +114,50 @@ func TestNewRouter(t *testing.T) {
 	}
 }
 
+// TestNewNormalizes checks that New lowercases hosts, drops IPv6 brackets and defaults pathPrefix to "/".
+func TestNewNormalizes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name           string
+		route          Route
+		wantHost       string
+		wantPathPrefix string
+	}{
+		{"host lowercased", Route{Host: "API.Example.com", PathPrefix: "/api"}, "api.example.com", "/api"},
+		{"wildcard host lowercased", Route{Host: "*.Example.com", PathPrefix: "/api"}, "*.example.com", "/api"},
+		{"IPv6 brackets removed", Route{Host: "[::1]", PathPrefix: "/api"}, "::1", "/api"},
+		{"no pathPrefix becomes root", Route{Host: "example.com"}, "example.com", "/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := tt.route
+			in.Name, in.Handler = "r1", named("h")
+			rt, err := New("web", []Route{in})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			got := rt.routes[0]
+			if got.Name != "r1" || got.Host != tt.wantHost || got.PathPrefix != tt.wantPathPrefix {
+				t.Errorf("route = {Name %q, Host %q, PathPrefix %q}, want {%q, %q, %q}",
+					got.Name, got.Host, got.PathPrefix, "r1", tt.wantHost, tt.wantPathPrefix)
+			}
+			if body := serve(got.Handler, "http://example.com/").Body.String(); body != "h" {
+				t.Errorf("route handler answered %q, want %q", body, "h")
+			}
+		})
+	}
+}
+
 // TestServeHTTP checks that each request reaches its most specific route, or gets 404.
 func TestServeHTTP(t *testing.T) {
 	t.Parallel()
-	rt, err := newRouter("web", []route{
-		{name: "api", host: "api.example.com", pathPrefix: "/api", handler: named("api")},
-		{name: "any-api", pathPrefix: "/api", handler: named("any-api")},
-		{name: "static", pathPrefix: "/static", handler: named("static")},
+	rt, err := New("web", []Route{
+		{Name: "api", Host: "api.example.com", PathPrefix: "/api", Handler: named("api")},
+		{Name: "any-api", PathPrefix: "/api", Handler: named("any-api")},
+		{Name: "static", PathPrefix: "/static", Handler: named("static")},
 	})
 	if err != nil {
-		t.Fatalf("newRouter: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	tests := []struct {
 		name       string
@@ -163,67 +211,4 @@ func TestLogRequest(t *testing.T) {
 			t.Errorf("logRequest wrote %q with Info disabled, want nothing", buf.String())
 		}
 	})
-}
-
-// TestBuild checks that Build returns a handler per entry point and rejects duplicate routes.
-func TestBuild(t *testing.T) {
-	t.Parallel()
-	servers := []config.Server{{URL: "http://127.0.0.1:1"}} // never called
-	web, admin := []string{"web"}, []string{"admin"}
-	entryPoints := map[string]config.EntryPoint{"web": {}, "admin": {}}
-	tests := []struct {
-		name    string
-		routes  map[string]config.Route
-		wantErr bool
-	}{
-		{
-			name: "routes on both entry points",
-			routes: map[string]config.Route{
-				"a": {Host: "a.com", EntryPoints: web, Servers: servers},
-				"b": {Host: "b.com", EntryPoints: admin, Servers: servers},
-			},
-		},
-		{
-			name: "entry point without routes",
-			routes: map[string]config.Route{
-				"a": {Host: "a.com", EntryPoints: web, Servers: servers},
-			},
-		},
-		{
-			name: "same host and pathPrefix on one entry point",
-			routes: map[string]config.Route{
-				"a": {Host: "a.com", PathPrefix: "/p", EntryPoints: web, Servers: servers},
-				"b": {Host: "a.com", PathPrefix: "/p", EntryPoints: web, Servers: servers},
-			},
-			wantErr: true,
-		},
-		{
-			name: "same host in other case",
-			routes: map[string]config.Route{
-				"a": {Host: "X.com", PathPrefix: "/p", EntryPoints: web, Servers: servers},
-				"b": {Host: "x.com", PathPrefix: "/p", EntryPoints: web, Servers: servers},
-			},
-			wantErr: true,
-		},
-		{
-			name: "same host and pathPrefix on different entry points",
-			routes: map[string]config.Route{
-				"a": {Host: "a.com", PathPrefix: "/p", EntryPoints: web, Servers: servers},
-				"b": {Host: "a.com", PathPrefix: "/p", EntryPoints: admin, Servers: servers},
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handlers, err := Build(entryPoints, tt.routes, nil, nil)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("Build error = %v, wantErr %v", err, tt.wantErr)
-			}
-			for ep := range entryPoints {
-				if err == nil && handlers[ep] == nil {
-					t.Errorf("Build returned no handler for entry point %q", ep)
-				}
-			}
-		})
-	}
 }

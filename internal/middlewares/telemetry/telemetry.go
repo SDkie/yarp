@@ -19,7 +19,8 @@ const (
 )
 
 // Telemetry records yarp's spans, metrics and logs. A nil *Telemetry means
-// it is off: its methods then do nothing and add no overhead.
+// it is off: callers then skip Handler and Transport, and its other methods
+// do nothing.
 type Telemetry struct {
 	tracer     trace.Tracer
 	propagator propagation.TextMapPropagator

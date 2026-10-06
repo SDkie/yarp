@@ -21,18 +21,17 @@ const (
 	cacheResultBypass = "bypass"
 )
 
-// New returns next wrapped with the HTTP cache: responses to GET and HEAD
+// Handler returns next wrapped with the HTTP cache: responses to GET and HEAD
 // are stored in s and reused while fresh, following the rules in the
-// package doc. s must not be nil; each request's cache result is recorded
-// in tel.
-func New(s Store, tel *telemetry.Telemetry, next http.Handler) http.Handler {
-	return &handler{s: s, tel: tel, next: next}
+// package doc. s must not be nil; each request's cache result is reported
+// with telemetry.SetCacheResult.
+func Handler(s Store, next http.Handler) http.Handler {
+	return &handler{s: s, next: next}
 }
 
-// handler is the middleware returned by New.
+// handler is the middleware returned by Handler.
 type handler struct {
 	s    Store
-	tel  *telemetry.Telemetry
 	next http.Handler
 }
 
@@ -60,7 +59,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // bypass forwards r without using the cache. It returns the recorder that
 // saw the response.
 func (h *handler) bypass(w http.ResponseWriter, r *http.Request) *recorder {
-	h.tel.RecordCacheResult(r.Context(), cacheResultBypass)
+	telemetry.SetCacheResult(r.Context(), cacheResultBypass)
 	rec := &recorder{ResponseWriter: w, cacheStatus: cacheStatusBypass}
 	h.next.ServeHTTP(rec, r)
 	return rec

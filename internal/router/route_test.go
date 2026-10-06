@@ -5,8 +5,6 @@ import (
 	"net/http/httptest"
 	"slices"
 	"testing"
-
-	"github.com/SDkie/yarp/internal/config"
 )
 
 // TestMatchHost checks exact, any-host and one-label wildcard host matching.
@@ -29,7 +27,7 @@ func TestMatchHost(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := (route{host: tt.routeHost}).matchHost(tt.host); got != tt.want {
+			if got := (Route{Host: tt.routeHost}).matchHost(tt.host); got != tt.want {
 				t.Errorf("route %q matchHost(%q) = %v, want %v", tt.routeHost, tt.host, got, tt.want)
 			}
 		})
@@ -55,7 +53,7 @@ func TestMatchPath(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := (route{pathPrefix: tt.pathPrefix}).matchPath(tt.path); got != tt.want {
+			if got := (Route{PathPrefix: tt.pathPrefix}).matchPath(tt.path); got != tt.want {
 				t.Errorf("route %q matchPath(%q) = %v, want %v", tt.pathPrefix, tt.path, got, tt.want)
 			}
 		})
@@ -90,15 +88,15 @@ func TestRequestHost(t *testing.T) {
 // TestCompareSpecificity checks that routes sort most specific first.
 func TestCompareSpecificity(t *testing.T) {
 	t.Parallel()
-	routes := []route{
-		{name: "any-root", pathPrefix: "/"},
-		{name: "wildcard-root", host: "*.example.com", pathPrefix: "/"},
-		{name: "exact-root", host: "api.example.com", pathPrefix: "/"},
-		{name: "any-api", pathPrefix: "/api"},
-		{name: "exact-api", host: "api.example.com", pathPrefix: "/api"},
-		{name: "any-api-v1", pathPrefix: "/api/v1"},
-		{name: "b-tie", host: "b.com", pathPrefix: "/x"},
-		{name: "a-tie", host: "a.com", pathPrefix: "/x"},
+	routes := []Route{
+		{Name: "any-root", PathPrefix: "/"},
+		{Name: "wildcard-root", Host: "*.example.com", PathPrefix: "/"},
+		{Name: "exact-root", Host: "api.example.com", PathPrefix: "/"},
+		{Name: "any-api", PathPrefix: "/api"},
+		{Name: "exact-api", Host: "api.example.com", PathPrefix: "/api"},
+		{Name: "any-api-v1", PathPrefix: "/api/v1"},
+		{Name: "b-tie", Host: "b.com", PathPrefix: "/x"},
+		{Name: "a-tie", Host: "a.com", PathPrefix: "/x"},
 	}
 	// Exact host, then wildcard, then any host; then the longer prefix;
 	// then by name.
@@ -107,31 +105,5 @@ func TestCompareSpecificity(t *testing.T) {
 	slices.SortFunc(routes, compareSpecificity)
 	if got := routeNames(routes); !slices.Equal(got, want) {
 		t.Errorf("sorted routes = %v, want %v", got, want)
-	}
-}
-
-// TestNewRoute checks that a route keeps its name, lowercases its host and defaults pathPrefix to "/".
-func TestNewRoute(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name           string
-		cfg            config.Route
-		wantHost       string
-		wantPathPrefix string
-	}{
-		{"host lowercased", config.Route{Host: "API.Example.com", PathPrefix: "/api"}, "api.example.com", "/api"},
-		{"wildcard host lowercased", config.Route{Host: "*.Example.com", PathPrefix: "/api"}, "*.example.com", "/api"},
-		{"no pathPrefix becomes root", config.Route{Host: "example.com"}, "example.com", "/"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := tt.cfg
-			cfg.Servers = []config.Server{{URL: "http://127.0.0.1:1"}} // never called
-			rt := newRoute("r1", cfg, http.DefaultTransport, nil, nil)
-			if rt.name != "r1" || rt.host != tt.wantHost || rt.pathPrefix != tt.wantPathPrefix {
-				t.Errorf("newRoute = {name %q, host %q, pathPrefix %q}, want {%q, %q, %q}",
-					rt.name, rt.host, rt.pathPrefix, "r1", tt.wantHost, tt.wantPathPrefix)
-			}
-		})
 	}
 }
