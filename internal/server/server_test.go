@@ -131,6 +131,7 @@ func freeAddr(t *testing.T) string {
 	return ln.Addr().String()
 }
 
+// TestServeProxiesRequests checks that an entry point proxies its routes and others answer 404.
 func TestServeProxiesRequests(t *testing.T) {
 	t.Parallel()
 	s := newServer(t, map[string]config.EntryPoint{
@@ -148,6 +149,7 @@ func TestServeProxiesRequests(t *testing.T) {
 	}
 }
 
+// TestAddr checks the address an entry point listens on, before and after Listen.
 func TestAddr(t *testing.T) {
 	t.Parallel()
 	s := newServer(t, map[string]config.EntryPoint{"web": {Address: "127.0.0.1:0"}}, newBackend(t, echoPath))
@@ -169,6 +171,7 @@ func TestAddr(t *testing.T) {
 	}
 }
 
+// TestListenAddressInUse checks that a taken address fails Listen and releases the others.
 func TestListenAddressInUse(t *testing.T) {
 	t.Parallel()
 	// Listen opens a, b and c in that order. bListener already holds b's
@@ -202,6 +205,7 @@ func TestListenAddressInUse(t *testing.T) {
 	}
 }
 
+// TestServeBeforeListen checks that Serve fails when Listen was not called.
 func TestServeBeforeListen(t *testing.T) {
 	t.Parallel()
 	s := newServer(t, map[string]config.EntryPoint{"web": {Address: "127.0.0.1:0"}}, newBackend(t, echoPath))
@@ -212,6 +216,7 @@ func TestServeBeforeListen(t *testing.T) {
 	}
 }
 
+// TestServeStopsOnCancel checks that cancelling the context stops Serve and closes the port.
 func TestServeStopsOnCancel(t *testing.T) {
 	t.Parallel()
 	s := newServer(t, map[string]config.EntryPoint{"web": {Address: "127.0.0.1:0"}}, newBackend(t, echoPath))
@@ -229,6 +234,7 @@ func TestServeStopsOnCancel(t *testing.T) {
 	}
 }
 
+// TestEntryPointFailureStopsOthers checks that one failing entry point shuts the others down.
 func TestEntryPointFailureStopsOthers(t *testing.T) {
 	t.Parallel()
 	s := newServer(t, map[string]config.EntryPoint{
@@ -254,6 +260,7 @@ func TestEntryPointFailureStopsOthers(t *testing.T) {
 	}
 }
 
+// TestShutdownWaitsForInFlightRequest checks that shutdown waits for a request in progress.
 func TestShutdownWaitsForInFlightRequest(t *testing.T) {
 	t.Parallel()
 	arrived := make(chan struct{})
@@ -319,6 +326,7 @@ func TestShutdownWaitsForInFlightRequest(t *testing.T) {
 	}
 }
 
+// TestNewRouteConflict checks that two routes with the same host and pathPrefix fail New.
 func TestNewRouteConflict(t *testing.T) {
 	t.Parallel()
 	backendURL := newBackend(t, echoPath)
