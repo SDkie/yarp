@@ -100,6 +100,9 @@ func TestNew(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			for i := range tt.routes {
+				tt.routes[i].Handler = named(tt.routes[i].Name)
+			}
 			rt, err := New("web", tt.routes)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("New error = %v, wantErr %v", err, tt.wantErr)
@@ -111,6 +114,15 @@ func TestNew(t *testing.T) {
 				t.Errorf("routes = %v, want %v", got, tt.wantOrder)
 			}
 		})
+	}
+}
+
+// TestNewNilHandler checks that a route without a Handler is rejected, naming the route.
+func TestNewNilHandler(t *testing.T) {
+	t.Parallel()
+	_, err := New("web", []Route{{Name: "ok", Handler: named("ok")}, {Name: "bad", PathPrefix: "/x"}})
+	if want := `route "bad" has no handler`; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("New error = %v, want %q", err, want)
 	}
 }
 

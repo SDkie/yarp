@@ -23,7 +23,8 @@ type Router struct {
 
 // New returns the router for entryPoint, trying routes most specific first;
 // with no routes, every request gets 404. It fails if two routes have the
-// same host and pathPrefix, since only one of them could ever match.
+// same host and pathPrefix, since only one of them could ever match, or if a
+// route has no Handler.
 func New(entryPoint string, routes []Route) (*Router, error) {
 	if len(routes) == 0 {
 		slog.Error("entry point has no routes, every request gets 404", "entrypoint", entryPoint)
@@ -31,6 +32,9 @@ func New(entryPoint string, routes []Route) (*Router, error) {
 	// Normalized copies, so matching compares hosts and paths directly.
 	rs := make([]Route, len(routes))
 	for i, r := range routes {
+		if r.Handler == nil {
+			return nil, fmt.Errorf("entry point %q: route %q has no handler", entryPoint, r.Name)
+		}
 		r.Host = normalizeHost(r.Host)
 		r.PathPrefix = cmp.Or(r.PathPrefix, "/")
 		rs[i] = r
