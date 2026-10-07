@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/SDkie/yarp/internal/config"
+	"github.com/SDkie/yarp/internal/middlewares/httpcache"
 	"github.com/SDkie/yarp/internal/server"
 )
 
@@ -59,12 +60,22 @@ cache:
 
 // yarp is a running yarp server.
 type yarp struct {
-	srv *server.Server
+	srv     *server.Server
+	cancel  context.CancelFunc
+	done    chan error // receives Serve's result
+	stopped bool
 }
 
 // startYarp writes configYAML and routesYAML (as routes.yml) to a temp dir,
-// loads them and serves them until the test ends.
+// loads them and serves them without a cache until the test ends.
 func startYarp(t *testing.T, configYAML, routesYAML string) *yarp {
+	t.Helper()
+	return startYarpWithStore(t, configYAML, routesYAML, nil)
+}
+
+// startYarpWithStore is startYarp with the cache stored in store, which must
+// be nil exactly when configYAML disables the cache, as in main.
+func startYarpWithStore(t *testing.T, configYAML, routesYAML string, store httpcache.Store) *yarp {
 	t.Helper()
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "yarp.yml")
@@ -75,7 +86,10 @@ func startYarp(t *testing.T, configYAML, routesYAML string) *yarp {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	srv, err := server.New(cfg.EntryPoints, cfg.Routes, nil, nil)
+	if cfg.Cache.Enabled != (store != nil) {
+		t.Fatalf("cache.enabled is %v but store != nil is %v", cfg.Cache.Enabled, store != nil)
+	}
+	srv, err := server.New(cfg.EntryPoints, cfg.Routes, store, nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -84,22 +98,30 @@ func startYarp(t *testing.T, configYAML, routesYAML string) *yarp {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
+	y := &yarp{srv: srv, cancel: cancel, done: make(chan error, 1)}
 	go func() {
-		done <- srv.Serve(ctx)
+		y.done <- srv.Serve(ctx)
 	}()
-	t.Cleanup(func() {
-		cancel()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Errorf("Serve: %v", err)
-			}
-		case <-time.After(waitTimeout):
-			t.Error("Serve did not return")
+	t.Cleanup(func() { y.stop(t) })
+	return y
+}
+
+// stop shuts y down and waits for Serve to return. Later calls do nothing.
+func (y *yarp) stop(t *testing.T) {
+	t.Helper()
+	if y.stopped {
+		return
+	}
+	y.stopped = true
+	y.cancel()
+	select {
+	case err := <-y.done:
+		if err != nil {
+			t.Errorf("Serve: %v", err)
 		}
-	})
-	return &yarp{srv: srv}
+	case <-time.After(waitTimeout):
+		t.Error("Serve did not return")
+	}
 }
 
 // url returns the URL of path on the named entry point.
