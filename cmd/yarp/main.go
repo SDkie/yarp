@@ -9,8 +9,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/SDkie/yarp/internal/cache"
+	"github.com/SDkie/yarp/internal/badgerdb"
 	"github.com/SDkie/yarp/internal/config"
+	"github.com/SDkie/yarp/internal/middlewares/httpcache"
 	"github.com/SDkie/yarp/internal/middlewares/telemetry"
 	"github.com/SDkie/yarp/internal/server"
 )
@@ -57,19 +58,21 @@ func run(ctx context.Context, configPath string) error {
 		defer tel.Stop() // runs last, so every line before it is exported
 	}
 
-	// c stays nil when the cache is disabled.
-	var c *cache.Cache
+	// store stays nil when the cache is disabled. It is only set to an opened
+	// store, never to a nil *badgerdb.Store.
+	var store httpcache.Store
 	if cfg.Cache.Enabled {
-		c, err = cache.Open(cache.DefaultDir)
+		db, err := badgerdb.Open(badgerdb.DefaultDir)
 		if err != nil {
 			slog.Error("failed to open cache", "error", err)
 			return err
 		}
-		defer c.Close()
+		defer db.Close()
+		store = db
 	}
 	slog.Info("cache configured", "enabled", cfg.Cache.Enabled)
 
-	if err := serve(ctx, cfg, c, tel); err != nil {
+	if err := serve(ctx, cfg, store, tel); err != nil {
 		slog.Error("yarp failed", "error", err)
 		return err
 	}
@@ -77,10 +80,10 @@ func run(ctx context.Context, configPath string) error {
 	return nil
 }
 
-// serve serves the entry points until ctx is cancelled. A nil c or tel
+// serve serves the entry points until ctx is cancelled. A nil store or tel
 // turns that layer off.
-func serve(ctx context.Context, cfg *config.Config, c *cache.Cache, tel *telemetry.Telemetry) error {
-	srv, err := server.New(cfg.EntryPoints, cfg.Routes, c, tel)
+func serve(ctx context.Context, cfg *config.Config, store httpcache.Store, tel *telemetry.Telemetry) error {
+	srv, err := server.New(cfg.EntryPoints, cfg.Routes, store, tel)
 	if err != nil {
 		return fmt.Errorf("build server: %w", err)
 	}

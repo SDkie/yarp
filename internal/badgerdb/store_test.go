@@ -1,4 +1,4 @@
-package cache
+package badgerdb
 
 import (
 	"bytes"
@@ -13,8 +13,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// open opens a Cache in dir and closes it when the test ends.
-func open(t *testing.T, dir string) *Cache {
+// open opens a Store in dir and closes it when the test ends.
+func open(t *testing.T, dir string) *Store {
 	t.Helper()
 	c, err := Open(dir)
 	if err != nil {
@@ -25,7 +25,7 @@ func open(t *testing.T, dir string) *Cache {
 }
 
 // get returns the value under key and whether it was found.
-func get(t *testing.T, c *Cache, key string) (string, bool) {
+func get(t *testing.T, c *Store, key string) (string, bool) {
 	t.Helper()
 	v, found, err := c.Get(key)
 	if err != nil {
@@ -34,7 +34,7 @@ func get(t *testing.T, c *Cache, key string) (string, bool) {
 	return string(v), found
 }
 
-func set(t *testing.T, c *Cache, key, value string, ttl time.Duration) {
+func set(t *testing.T, c *Store, key, value string, ttl time.Duration) {
 	t.Helper()
 	if err := c.Set(key, []byte(value), ttl); err != nil {
 		t.Fatalf("Set(%q): %v", key, err)
@@ -43,7 +43,7 @@ func set(t *testing.T, c *Cache, key, value string, ttl time.Duration) {
 
 // expiresAt returns the expiry Badger stored for key, in Unix seconds, or 0
 // for none.
-func expiresAt(t *testing.T, c *Cache, key string) uint64 {
+func expiresAt(t *testing.T, c *Store, key string) uint64 {
 	t.Helper()
 	var exp uint64
 	err := c.db.View(func(txn *badger.Txn) error {

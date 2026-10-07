@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Store keeps the encoded records. *cache.Cache implements it.
+// Store keeps the encoded records. *badgerdb.Store implements it.
 type Store interface {
 	// Get returns the value under key; found is false if it is missing or
 	// expired.

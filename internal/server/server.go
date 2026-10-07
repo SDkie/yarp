@@ -13,7 +13,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/SDkie/yarp/internal/cache"
 	"github.com/SDkie/yarp/internal/config"
 	"github.com/SDkie/yarp/internal/middlewares/httpcache"
 	"github.com/SDkie/yarp/internal/middlewares/telemetry"
@@ -43,13 +42,8 @@ type entryPoint struct {
 }
 
 // New builds the handler of every entry point (see newHandlers) and the
-// HTTP server that serves it. A nil c or tel turns that layer off.
-func New(entryPoints map[string]config.EntryPoint, routes map[string]config.Route, c *cache.Cache, tel *telemetry.Telemetry) (*Server, error) {
-	// A nil *cache.Cache must become a nil Store, not a Store holding nil.
-	var store httpcache.Store
-	if c != nil {
-		store = c
-	}
+// HTTP server that serves it. A nil store or tel turns that layer off.
+func New(entryPoints map[string]config.EntryPoint, routes map[string]config.Route, store httpcache.Store, tel *telemetry.Telemetry) (*Server, error) {
 	handlers, err := newHandlers(entryPoints, routes, newTransport(), store, tel)
 	if err != nil {
 		return nil, err

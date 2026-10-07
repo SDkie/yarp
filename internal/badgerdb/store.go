@@ -1,5 +1,5 @@
-// Package cache is a key/value store backed by BadgerDB.
-package cache
+// Package badgerdb is a key/value store backed by BadgerDB.
+package badgerdb
 
 import (
 	"errors"
@@ -10,31 +10,31 @@ import (
 	"github.com/dgraph-io/badger/v4"
 )
 
-// DefaultDir is where yarp stores the HTTP cache, relative to the working
+// DefaultDir is the default directory of the store, relative to the working
 // directory.
 const DefaultDir = ".cache"
 
-// Cache is a key/value store backed by BadgerDB. It is safe for concurrent
+// Store is a key/value store backed by BadgerDB. It is safe for concurrent
 // use.
-type Cache struct {
+type Store struct {
 	db *badger.DB
 }
 
-// Open opens the store in dir, creating it if needed. Only one Cache may use
+// Open opens the store in dir, creating it if needed. Only one Store may use
 // a dir at a time. The caller must call Close when done.
-func Open(dir string) (*Cache, error) {
+func Open(dir string) (*Store, error) {
 	opts := badger.DefaultOptions(dir).WithLogger(badgerLogger{})
 	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("open cache %q: %w", dir, err)
 	}
-	return &Cache{db: db}, nil
+	return &Store{db: db}, nil
 }
 
 // Get returns the value stored under key. found is false when the key does
 // not exist or has expired; err is only set for real failures.
-func (c *Cache) Get(key string) (value []byte, found bool, err error) {
-	err = c.db.View(func(txn *badger.Txn) error {
+func (s *Store) Get(key string) (value []byte, found bool, err error) {
+	err = s.db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(key))
 		if err != nil {
 			return err
@@ -53,8 +53,8 @@ func (c *Cache) Get(key string) (value []byte, found bool, err error) {
 
 // Set stores value under key. With ttl > 0 the entry expires after ttl;
 // with ttl == 0 it never expires.
-func (c *Cache) Set(key string, value []byte, ttl time.Duration) error {
-	err := c.db.Update(func(txn *badger.Txn) error {
+func (s *Store) Set(key string, value []byte, ttl time.Duration) error {
+	err := s.db.Update(func(txn *badger.Txn) error {
 		entry := badger.NewEntry([]byte(key), value)
 		if ttl > 0 {
 			entry = entry.WithTTL(ttl)
@@ -68,8 +68,8 @@ func (c *Cache) Set(key string, value []byte, ttl time.Duration) error {
 }
 
 // Delete removes key. Deleting a key that does not exist is not an error.
-func (c *Cache) Delete(key string) error {
-	err := c.db.Update(func(txn *badger.Txn) error {
+func (s *Store) Delete(key string) error {
+	err := s.db.Update(func(txn *badger.Txn) error {
 		return txn.Delete([]byte(key))
 	})
 	if err != nil {
@@ -79,8 +79,8 @@ func (c *Cache) Delete(key string) error {
 }
 
 // Close flushes pending writes and releases the store.
-func (c *Cache) Close() error {
-	err := c.db.Close()
+func (s *Store) Close() error {
+	err := s.db.Close()
 	if err != nil {
 		slog.Error("failed to close cache", "error", err)
 	}
