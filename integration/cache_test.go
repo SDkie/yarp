@@ -148,7 +148,7 @@ func TestCacheHit(t *testing.T) {
 	t.Parallel()
 	backendURL, count := newCountingBackend(t, cacheable("v1"))
 	store := openStore(t, t.TempDir())
-	y := startYarpWithStore(t, cacheConfig, appRoutes(backendURL), store)
+	y := startYarpWith(t, cacheConfig, appRoutes(backendURL), store, nil)
 
 	fetch(t, newRequest(t, http.MethodGet, y.url("web", "/page"), ""), cacheMiss, "v1")
 	store.waitSets(t, setsPerResponse)
@@ -165,7 +165,7 @@ func TestCacheBypass(t *testing.T) {
 	t.Parallel()
 	backendURL, count := newCountingBackend(t, cacheable("v1"))
 	store := openStore(t, t.TempDir())
-	y := startYarpWithStore(t, cacheConfig, appRoutes(backendURL), store)
+	y := startYarpWith(t, cacheConfig, appRoutes(backendURL), store, nil)
 
 	fetch(t, newRequest(t, http.MethodGet, y.url("web", "/page"), ""), cacheMiss, "v1")
 	store.waitSets(t, setsPerResponse)
@@ -189,13 +189,14 @@ func TestCacheInvalidation(t *testing.T) {
 		cacheable(fmt.Sprintf("v%d", version.Load()))(w, r)
 	})
 	store := openStore(t, t.TempDir())
-	y := startYarpWithStore(t, cacheConfig, appRoutes(backendURL), store)
+	y := startYarpWith(t, cacheConfig, appRoutes(backendURL), store, nil)
 
 	fetch(t, newRequest(t, http.MethodGet, y.url("web", "/page"), ""), cacheMiss, "v0")
 	store.waitSets(t, setsPerResponse)
 	fetch(t, newRequest(t, http.MethodPost, y.url("web", "/page"), "update"), cacheBypass, "")
 	store.waitDeletes(t, 2) // The GET and HEAD Vary records.
 	fetch(t, newRequest(t, http.MethodGet, y.url("web", "/page"), ""), cacheMiss, "v1")
+	store.waitSets(t, setsPerResponse) // Before the store closes.
 
 	checkCount(t, count, 3)
 }
@@ -209,7 +210,7 @@ func TestCacheVary(t *testing.T) {
 		cacheable(r.Header.Get("Accept-Language"))(w, r)
 	})
 	store := openStore(t, t.TempDir())
-	y := startYarpWithStore(t, cacheConfig, appRoutes(backendURL), store)
+	y := startYarpWith(t, cacheConfig, appRoutes(backendURL), store, nil)
 
 	get := func(lang, wantCacheStatus string) {
 		t.Helper()
@@ -246,7 +247,7 @@ routes:
 		newBackend(t, cacheable("b")),
 	)
 	store := openStore(t, t.TempDir())
-	y := startYarpWithStore(t, cacheConfig, routes, store)
+	y := startYarpWith(t, cacheConfig, routes, store, nil)
 
 	get := func(host, wantCacheStatus string) {
 		t.Helper()
@@ -276,14 +277,14 @@ func TestCacheSurvivesRestart(t *testing.T) {
 	}
 
 	store := openStore(t, dir)
-	y := startYarpWithStore(t, cacheConfig, appRoutes(backendURL), store)
+	y := startYarpWith(t, cacheConfig, appRoutes(backendURL), store, nil)
 	fetch(t, newPageRequest(y), cacheMiss, "v1")
 	store.waitSets(t, setsPerResponse)
 	y.stop(t)
 	store.close(t)
 
 	store = openStore(t, dir)
-	y = startYarpWithStore(t, cacheConfig, appRoutes(backendURL), store)
+	y = startYarpWith(t, cacheConfig, appRoutes(backendURL), store, nil)
 	fetch(t, newPageRequest(y), cacheHit, "v1")
 
 	checkCount(t, count, 1)

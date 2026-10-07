@@ -29,13 +29,13 @@ func newTestTelemetry(t *testing.T) *testTelemetry {
 	t.Helper()
 	spans := tracetest.NewSpanRecorder()
 	reader := sdkmetric.NewManualReader()
-	tel, err := newTelemetry(
+	tel, err := New(
 		sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans)),
 		sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)),
 		sdklog.NewLoggerProvider(),
 	)
 	if err != nil {
-		t.Fatalf("newTelemetry: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	return &testTelemetry{Telemetry: tel, spans: spans, reader: reader}
 }

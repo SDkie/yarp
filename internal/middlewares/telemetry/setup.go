@@ -50,7 +50,7 @@ func Setup(cfg *config.Otel, version string, level slog.Leveler) (*Telemetry, er
 		return nil, err
 	}
 
-	t, err := newTelemetry(tp, mp, lp)
+	t, err := New(tp, mp, lp)
 	if err != nil {
 		return nil, err
 	}

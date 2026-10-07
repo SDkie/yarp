@@ -33,9 +33,9 @@ type Telemetry struct {
 	console *slog.Logger // the default logger before Setup, restored by Stop
 }
 
-// newTelemetry returns a Telemetry that records to tp, mp and lp; Stop
-// shuts them down.
-func newTelemetry(tp *sdktrace.TracerProvider, mp *sdkmetric.MeterProvider, lp *sdklog.LoggerProvider) (*Telemetry, error) {
+// New returns a Telemetry that records to tp, mp and lp; Stop shuts them
+// down. Unlike Setup, it sets no globals and leaves the default logger as is.
+func New(tp *sdktrace.TracerProvider, mp *sdkmetric.MeterProvider, lp *sdklog.LoggerProvider) (*Telemetry, error) {
 	m, err := newMetrics(mp.Meter(scopeName))
 	if err != nil {
 		return nil, err

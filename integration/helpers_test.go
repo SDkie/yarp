@@ -16,6 +16,7 @@ import (
 
 	"github.com/SDkie/yarp/internal/config"
 	"github.com/SDkie/yarp/internal/middlewares/httpcache"
+	"github.com/SDkie/yarp/internal/middlewares/telemetry"
 	"github.com/SDkie/yarp/internal/server"
 )
 
@@ -70,12 +71,13 @@ type yarp struct {
 // loads them and serves them without a cache until the test ends.
 func startYarp(t *testing.T, configYAML, routesYAML string) *yarp {
 	t.Helper()
-	return startYarpWithStore(t, configYAML, routesYAML, nil)
+	return startYarpWith(t, configYAML, routesYAML, nil, nil)
 }
 
-// startYarpWithStore is startYarp with the cache stored in store, which must
-// be nil exactly when configYAML disables the cache, as in main.
-func startYarpWithStore(t *testing.T, configYAML, routesYAML string, store httpcache.Store) *yarp {
+// startYarpWith is startYarp with the cache stored in store, which must be
+// nil exactly when configYAML disables the cache, as in main, and telemetry
+// recorded to tel unless it is nil.
+func startYarpWith(t *testing.T, configYAML, routesYAML string, store httpcache.Store, tel *telemetry.Telemetry) *yarp {
 	t.Helper()
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "yarp.yml")
@@ -89,7 +91,7 @@ func startYarpWithStore(t *testing.T, configYAML, routesYAML string, store httpc
 	if cfg.Cache.Enabled != (store != nil) {
 		t.Fatalf("cache.enabled is %v but store != nil is %v", cfg.Cache.Enabled, store != nil)
 	}
-	srv, err := server.New(cfg.EntryPoints, cfg.Routes, store, nil)
+	srv, err := server.New(cfg.EntryPoints, cfg.Routes, store, tel)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -106,7 +108,8 @@ func startYarpWithStore(t *testing.T, configYAML, routesYAML string, store httpc
 	return y
 }
 
-// stop shuts y down and waits for Serve to return. Later calls do nothing.
+// stop shuts y down and waits for Serve to return, so every request has
+// finished. Later calls do nothing.
 func (y *yarp) stop(t *testing.T) {
 	t.Helper()
 	if y.stopped {
