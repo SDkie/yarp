@@ -1,14 +1,19 @@
 package telemetry
 
 import (
+	"context"
 	"io"
 	"maps"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -232,5 +237,115 @@ func TestResponseWriterUnwrap(t *testing.T) {
 	}
 	if !inner.Flushed {
 		t.Error("the wrapped writer was not flushed")
+	}
+}
+
+// overheadPoint is one data point of yarp.request.overhead: its attributes
+// and the sum of its values.
+type overheadPoint struct {
+	attrs map[string]string
+	sum   time.Duration
+}
+
+// overheads returns the data points of yarp.request.overhead.
+func (tel *testTelemetry) overheads(t *testing.T) []overheadPoint {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	if err := tel.reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("collect metrics: %v", err)
+	}
+	var points []overheadPoint
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "yarp.request.overhead" {
+				continue
+			}
+			for _, dp := range m.Data.(metricdata.Histogram[float64]).DataPoints {
+				sum := time.Duration(math.Round(dp.Sum * float64(time.Second)))
+				points = append(points, overheadPoint{attrMap(dp.Attributes.ToSlice()), sum})
+			}
+		}
+	}
+	return points
+}
+
+// TestHandlerOverhead checks that the overhead is the time to the response
+// headers minus the time spent waiting for backends.
+func TestHandlerOverhead(t *testing.T) {
+	t.Parallel()
+	// callBackend sends a request for r to a backend that takes d to answer.
+	callBackend := func(t *testing.T, tel *testTelemetry, r *http.Request, d time.Duration) {
+		backend := roundTripFunc(func(*http.Request) (*http.Response, error) {
+			time.Sleep(d)
+			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+		})
+		send(t, r.Context(), tel, backend, "http://backend/x")
+	}
+	tests := []struct {
+		name string
+		next func(t *testing.T, tel *testTelemetry, w http.ResponseWriter, r *http.Request)
+		want []overheadPoint
+	}{
+		{
+			name: "backend request",
+			next: func(t *testing.T, tel *testTelemetry, w http.ResponseWriter, r *http.Request) {
+				SetRoute(r.Context(), "api")
+				SetCacheResult(r.Context(), "miss")
+				time.Sleep(time.Millisecond)
+				callBackend(t, tel, r, 30*time.Millisecond)
+				time.Sleep(2 * time.Millisecond)
+				w.WriteHeader(http.StatusOK)
+				time.Sleep(50 * time.Millisecond) // The body is not counted.
+			},
+			want: []overheadPoint{{map[string]string{"yarp.entrypoint": "web", "yarp.route": "api", "yarp.cache.result": "miss"}, 3 * time.Millisecond}},
+		},
+		{
+			name: "two backend requests",
+			next: func(t *testing.T, tel *testTelemetry, w http.ResponseWriter, r *http.Request) {
+				SetRoute(r.Context(), "api")
+				callBackend(t, tel, r, 10*time.Millisecond)
+				time.Sleep(time.Millisecond)
+				callBackend(t, tel, r, 20*time.Millisecond)
+				io.WriteString(w, "x")
+			},
+			want: []overheadPoint{{map[string]string{"yarp.entrypoint": "web", "yarp.route": "api"}, time.Millisecond}},
+		},
+		{
+			name: "cache hit",
+			next: func(t *testing.T, tel *testTelemetry, w http.ResponseWriter, r *http.Request) {
+				SetRoute(r.Context(), "api")
+				SetCacheResult(r.Context(), "hit")
+				time.Sleep(4 * time.Millisecond)
+				io.WriteString(w, "x")
+			},
+			want: []overheadPoint{{map[string]string{"yarp.entrypoint": "web", "yarp.route": "api", "yarp.cache.result": "hit"}, 4 * time.Millisecond}},
+		},
+		{
+			name: "no route",
+			next: func(t *testing.T, tel *testTelemetry, w http.ResponseWriter, r *http.Request) {
+				time.Sleep(time.Millisecond)
+				w.WriteHeader(http.StatusNotFound)
+			},
+			want: []overheadPoint{{map[string]string{"yarp.entrypoint": "web", "yarp.route": ""}, time.Millisecond}},
+		},
+		{
+			name: "nothing sent",
+			next: func(t *testing.T, tel *testTelemetry, w http.ResponseWriter, r *http.Request) {
+				time.Sleep(time.Millisecond)
+			},
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				tel := newTestTelemetry(t)
+				serve(tel, func(w http.ResponseWriter, r *http.Request) { tt.next(t, tel, w, r) }, http.MethodGet, "http://example.com/api")
+				if got := tel.overheads(t); !reflect.DeepEqual(got, tt.want) {
+					t.Errorf("overhead = %v, want %v", got, tt.want)
+				}
+			})
+		})
 	}
 }

@@ -55,9 +55,11 @@ func (tr *transport) startRequest(r *http.Request) (context.Context, clientReque
 	return ctx, req
 }
 
-// endRequest ends the span and records the request's duration, unless the
-// client cancelled it.
+// endRequest adds the request's duration to the incoming request's backend
+// time, ends the span and records the duration, unless the client cancelled it.
 func (tr *transport) endRequest(ctx context.Context, req clientRequest, r *http.Request, resp *http.Response, err error) {
+	elapsed := time.Since(req.start)
+	addBackendTime(ctx, elapsed)
 	if errors.Is(err, context.Canceled) && r.Context().Err() != nil {
 		req.span.End()
 		return
@@ -70,7 +72,7 @@ func (tr *transport) endRequest(ctx context.Context, req clientRequest, r *http.
 		endClientSpan(req.span, resp.StatusCode, nil)
 		attrs = append(attrs, tr.tel.metrics.clientDuration.AttrResponseStatusCode(resp.StatusCode))
 	}
-	tr.tel.metrics.clientDuration.Record(ctx, time.Since(req.start).Seconds(), req.method, r.URL.Hostname(), getPort(r.URL), attrs...)
+	tr.tel.metrics.clientDuration.Record(ctx, elapsed.Seconds(), req.method, r.URL.Hostname(), getPort(r.URL), attrs...)
 }
 
 // startClientSpan starts the span for req, which yarp sends to a backend of

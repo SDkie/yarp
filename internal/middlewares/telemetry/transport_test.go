@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"reflect"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -180,6 +182,44 @@ func TestTransportMetrics(t *testing.T) {
 			if got := tel.points(t, "http.client.request.duration"); !reflect.DeepEqual(got, want) {
 				t.Errorf("request duration = %v, want %v", got, want)
 			}
+		})
+	}
+}
+
+// TestTransportAddsBackendTime checks that each backend request's duration is
+// added to the incoming request's backend time, however it ends.
+func TestTransportAddsBackendTime(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		cancelClient bool
+		err          error
+	}{
+		{"status", false, nil},
+		{"error", false, errRefused},
+		{"cancelled by the client", true, context.Canceled},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				tel := newTestTelemetry(t)
+				info := &requestInfo{backendTime: time.Second}
+				ctx, cancel := context.WithCancel(context.WithValue(context.Background(), infoCtxKey{}, info))
+				defer cancel()
+				if tt.cancelClient {
+					cancel()
+				}
+				backend := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					time.Sleep(30 * time.Millisecond)
+					return respond(http.StatusOK, tt.err)(r)
+				})
+				send(t, ctx, tel, backend, "http://backend/x")
+
+				if want := time.Second + 30*time.Millisecond; info.backendTime != want {
+					t.Errorf("backend time = %v, want %v", info.backendTime, want)
+				}
+			})
 		})
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/semconv/v1.43.0/httpconv"
@@ -57,8 +58,8 @@ func (h *handler) startRequest(r *http.Request) (context.Context, serverRequest)
 }
 
 // endRequest records the cache result, ends the span and records the
-// request's duration. It takes rw, not its status, since a deferred call
-// evaluates its arguments early.
+// request's duration and overhead. It takes rw, not its status, since a
+// deferred call evaluates its arguments early.
 func (h *handler) endRequest(ctx context.Context, req serverRequest, rw *responseWriter) {
 	h.tel.recordCacheResult(ctx, req.span, req.info.cacheResult)
 	endServerSpan(req.span, rw.status, req.info.route)
@@ -68,12 +69,27 @@ func (h *handler) endRequest(ctx context.Context, req serverRequest, rw *respons
 		attrs = append(attrs, h.tel.metrics.serverDuration.AttrResponseStatusCode(rw.status))
 	}
 	h.tel.metrics.serverDuration.Record(ctx, time.Since(req.start).Seconds(), req.method, scheme, attrs...)
+	if rw.status > 0 {
+		h.recordOverhead(ctx, req, rw.headersAt)
+	}
+}
+
+// recordOverhead records yarp's own time for the request: from its start to
+// headersAt, minus the time spent waiting for backends.
+func (h *handler) recordOverhead(ctx context.Context, req serverRequest, headersAt time.Time) {
+	attrs := []attribute.KeyValue{h.entryPoint, routeKey.String(req.info.route)}
+	if req.info.cacheResult != "" {
+		attrs = append(attrs, cacheResultKey.String(req.info.cacheResult))
+	}
+	overhead := headersAt.Sub(req.start) - req.info.backendTime
+	h.tel.metrics.requestOverhead.Record(ctx, overhead.Seconds(), metric.WithAttributes(attrs...))
 }
 
 // requestInfo is what the handlers inside report about a request.
 type requestInfo struct {
-	route       string // set by SetRoute
-	cacheResult string // set by SetCacheResult
+	route       string        // set by SetRoute
+	cacheResult string        // set by SetCacheResult
+	backendTime time.Duration // added to by the transport
 }
 
 // infoCtxKey holds the request's *requestInfo.
@@ -84,6 +100,14 @@ type infoCtxKey struct{}
 func SetRoute(ctx context.Context, route string) {
 	if info, ok := ctx.Value(infoCtxKey{}).(*requestInfo); ok {
 		info.route = route
+	}
+}
+
+// addBackendTime adds d, the time spent waiting for a backend, to the
+// request with context ctx. It does nothing when telemetry is off.
+func addBackendTime(ctx context.Context, d time.Duration) {
+	if info, ok := ctx.Value(infoCtxKey{}).(*requestInfo); ok {
+		info.backendTime += d
 	}
 }
 
@@ -118,25 +142,32 @@ func endServerSpan(span trace.Span, status int, route string) {
 }
 
 // responseWriter records the status code sent to the client, which stays 0
-// when nothing was sent (such as when the client went away).
+// when nothing was sent (such as when the client went away), and when it
+// was sent.
 type responseWriter struct {
 	http.ResponseWriter
-	status int
+	status    int
+	headersAt time.Time
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
 	// 1xx responses are interim; only the first final status counts.
 	if rw.status == 0 && code >= 200 {
-		rw.status = code
+		rw.setStatus(code)
 	}
 	rw.ResponseWriter.WriteHeader(code)
 }
 
 func (rw *responseWriter) Write(b []byte) (int, error) {
 	if rw.status == 0 {
-		rw.status = http.StatusOK
+		rw.setStatus(http.StatusOK)
 	}
 	return rw.ResponseWriter.Write(b)
+}
+
+func (rw *responseWriter) setStatus(code int) {
+	rw.status = code
+	rw.headersAt = time.Now()
 }
 
 // Unwrap gives http.ResponseController access to the underlying writer, so
