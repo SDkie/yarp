@@ -72,3 +72,9 @@ Run:
 ```
 
 A request to `http://example.com:8080/api/users` is forwarded to one of the two servers. Requests that match no route get `404`.
+
+## Grafana dashboard
+
+`contrib/grafana/yarp.json` is a Grafana dashboard for yarp's OpenTelemetry data: traffic, status codes, cache results, yarp's own overhead, backends, Go runtime, traces and logs. It expects the metrics in Prometheus, the traces in Tempo and the logs in Loki, as in the [`grafana/otel-lgtm`](https://github.com/grafana/docker-otel-lgtm) image.
+
+Import it with **Dashboards → New → Import**, then pick the Prometheus, Loki and Tempo data sources at the top of the dashboard.
