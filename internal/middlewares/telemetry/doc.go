@@ -10,6 +10,7 @@
 //   - http.server.request.duration, http.server.active_requests (Handler)
 //   - http.client.request.duration (Transport)
 //   - yarp.cache.requests (SetCacheResult)
+//   - yarp.cache.enabled (MarkCacheEnabled)
 //   - Go runtime metrics
 //
 // Logs: the default slog logger's records at or above the given level

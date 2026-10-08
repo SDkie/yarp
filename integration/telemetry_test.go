@@ -94,6 +94,29 @@ func (rec *recorder) counts(t *testing.T, name string, key attribute.Key) map[st
 	return counts
 }
 
+// gauge returns the value of the gauge called name, which has one data point.
+func (rec *recorder) gauge(t *testing.T, name string) int64 {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	if err := rec.reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("collect metrics: %v", err)
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != name {
+				continue
+			}
+			data, ok := m.Data.(metricdata.Gauge[int64])
+			if !ok || len(data.DataPoints) != 1 {
+				t.Fatalf("metric %s is %T, want a gauge with one data point", name, m.Data)
+			}
+			return data.DataPoints[0].Value
+		}
+	}
+	t.Fatalf("metric %s was not recorded", name)
+	return 0
+}
+
 // checkAttrs checks that span has the attributes in want.
 func checkAttrs(t *testing.T, span sdktrace.ReadOnlySpan, want map[attribute.Key]string) {
 	t.Helper()
@@ -127,6 +150,7 @@ const (
 	serverDuration = "http.server.request.duration"
 	clientDuration = "http.client.request.duration"
 	cacheRequests  = "yarp.cache.requests"
+	cacheEnabled   = "yarp.cache.enabled"
 )
 
 // Attribute keys checked below.
@@ -173,6 +197,9 @@ func TestTelemetryRequest(t *testing.T) {
 	checkCounts(t, serverDuration, rec.counts(t, serverDuration, routeKey), map[string]int64{"app": 1})
 	checkCounts(t, clientDuration, rec.counts(t, clientDuration, routeKey), map[string]int64{"app": 1})
 	checkCounts(t, cacheRequests, rec.counts(t, cacheRequests, cacheResultKey), map[string]int64{"miss": 1})
+	if got := rec.gauge(t, cacheEnabled); got != 1 {
+		t.Errorf("%s = %d, want 1 with the cache on", cacheEnabled, got)
+	}
 }
 
 // TestTelemetryCacheHit checks that a cache hit is recorded as such and,
@@ -226,6 +253,9 @@ routes:
 		t.Errorf("got %d client spans, want 0", n)
 	}
 	checkCounts(t, serverDuration, rec.counts(t, serverDuration, routeKey), map[string]int64{"": 1})
+	if got := rec.gauge(t, cacheEnabled); got != 0 {
+		t.Errorf("%s = %d, want 0 with the cache off", cacheEnabled, got)
+	}
 }
 
 // TestTelemetryContinuesTrace checks that a request with a traceparent is

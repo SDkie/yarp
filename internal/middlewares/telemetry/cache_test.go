@@ -39,3 +39,36 @@ func TestSetCacheResult(t *testing.T) {
 		})
 	}
 }
+
+// TestMarkCacheEnabled checks that yarp.cache.enabled is 0 until the cache is marked enabled, then 1.
+func TestMarkCacheEnabled(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		mark bool
+		want int64
+	}{
+		{"not marked", false, 0},
+		{"marked", true, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tel := newTestTelemetry(t)
+			if tt.mark {
+				tel.MarkCacheEnabled()
+			}
+			want := []point{{map[string]string{}, tt.want}}
+			if got := tel.points(t, "yarp.cache.enabled"); !reflect.DeepEqual(got, want) {
+				t.Errorf("yarp.cache.enabled = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestMarkCacheEnabledOff checks that marking a nil Telemetry is safe.
+func TestMarkCacheEnabledOff(t *testing.T) {
+	t.Parallel()
+	var tel *Telemetry
+	tel.MarkCacheEnabled()
+}

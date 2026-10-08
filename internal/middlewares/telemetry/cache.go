@@ -25,3 +25,11 @@ func (t *Telemetry) recordCacheResult(ctx context.Context, span trace.Span, resu
 	t.metrics.cacheRequests.Add(ctx, 1, metric.WithAttributes(attr))
 	span.SetAttributes(attr)
 }
+
+// MarkCacheEnabled records that the cache is on: yarp.cache.enabled is 0
+// until then. It does nothing when telemetry is off.
+func (t *Telemetry) MarkCacheEnabled() {
+	if t != nil {
+		t.metrics.cacheEnabled.Store(true)
+	}
+}

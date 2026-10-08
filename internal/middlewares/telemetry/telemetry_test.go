@@ -51,7 +51,7 @@ func (tel *testTelemetry) span(t *testing.T) sdktrace.ReadOnlySpan {
 }
 
 // point is one data point of a metric: its attributes and its value, a
-// counter's sum or a histogram's count.
+// counter's sum, a gauge's value or a histogram's count.
 type point struct {
 	attrs map[string]string
 	value int64
@@ -73,6 +73,10 @@ func (tel *testTelemetry) points(t *testing.T, name string) []point {
 			}
 			switch data := m.Data.(type) {
 			case metricdata.Sum[int64]:
+				for _, dp := range data.DataPoints {
+					points = append(points, point{attrMap(dp.Attributes.ToSlice()), dp.Value})
+				}
+			case metricdata.Gauge[int64]:
 				for _, dp := range data.DataPoints {
 					points = append(points, point{attrMap(dp.Attributes.ToSlice()), dp.Value})
 				}

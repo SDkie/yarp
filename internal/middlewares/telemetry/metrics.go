@@ -1,8 +1,10 @@
 package telemetry
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/semconv/v1.43.0/httpconv"
@@ -15,6 +17,9 @@ type metrics struct {
 	clientDuration  httpconv.ClientRequestDuration
 	cacheRequests   metric.Int64Counter
 	requestOverhead metric.Float64Histogram
+	// cacheEnabled is read by the yarp.cache.enabled gauge on the exporter's
+	// goroutine. It is a pointer because an atomic.Bool must not be copied.
+	cacheEnabled *atomic.Bool
 }
 
 // overheadBuckets are the bucket boundaries of yarp.request.overhead, in
@@ -30,7 +35,7 @@ var overheadBuckets = []float64{
 
 func newMetrics(meter metric.Meter) (metrics, error) {
 	var m metrics
-	var errs [5]error
+	var errs [6]error
 	m.serverDuration, errs[0] = httpconv.NewServerRequestDuration(meter)
 	m.serverActive, errs[1] = httpconv.NewServerActiveRequests(meter)
 	m.clientDuration, errs[2] = httpconv.NewClientRequestDuration(meter)
@@ -41,6 +46,17 @@ func newMetrics(meter metric.Meter) (metrics, error) {
 		metric.WithDescription("Time yarp adds to a request: its time to the response headers minus the backend's."),
 		metric.WithUnit("s"),
 		metric.WithExplicitBucketBoundaries(overheadBuckets...))
+	m.cacheEnabled = new(atomic.Bool)
+	_, errs[5] = meter.Int64ObservableGauge("yarp.cache.enabled",
+		metric.WithDescription("1 if the HTTP cache is enabled, 0 if not."),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			var v int64
+			if m.cacheEnabled.Load() {
+				v = 1
+			}
+			o.Observe(v)
+			return nil
+		}))
 	if err := errors.Join(errs[:]...); err != nil {
 		return metrics{}, fmt.Errorf("create metric instruments: %w", err)
 	}

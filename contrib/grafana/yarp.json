@@ -25,7 +25,7 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 5,
+        "w": 4,
         "x": 0,
         "y": 1
       },
@@ -66,8 +66,8 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 5,
-        "x": 5,
+        "w": 4,
+        "x": 4,
         "y": 1
       },
       "id": 3,
@@ -101,14 +101,71 @@
       },
       "fieldConfig": {
         "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "color": "text",
+                  "index": 1,
+                  "text": "Off"
+                },
+                "1": {
+                  "color": "green",
+                  "index": 0,
+                  "text": "On"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "id": 28,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheus}"
+          },
+          "expr": "max(yarp_cache_enabled{service_name=\"yarp\"} and (time() - timestamp(yarp_cache_enabled{service_name=\"yarp\"}) < 60))",
+          "legendFormat": "cache",
+          "refId": "A"
+        }
+      ],
+      "title": "Cache",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheus}"
+      },
+      "fieldConfig": {
+        "defaults": {
           "unit": "percentunit"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 5,
-        "w": 5,
-        "x": 10,
+        "w": 4,
+        "x": 12,
         "y": 1
       },
       "id": 4,
@@ -148,8 +205,8 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 5,
-        "x": 15,
+        "w": 4,
+        "x": 16,
         "y": 1
       },
       "id": 5,

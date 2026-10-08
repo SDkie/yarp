@@ -44,6 +44,9 @@ type entryPoint struct {
 // New builds the handler of every entry point (see newHandlers) and the
 // HTTP server that serves it. A nil store or tel turns that layer off.
 func New(entryPoints map[string]config.EntryPoint, routes map[string]config.Route, store httpcache.Store, tel *telemetry.Telemetry) (*Server, error) {
+	if store != nil {
+		tel.MarkCacheEnabled()
+	}
 	handlers, err := newHandlers(entryPoints, routes, newTransport(), store, tel)
 	if err != nil {
 		return nil, err
