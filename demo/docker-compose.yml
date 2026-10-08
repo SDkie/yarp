@@ -1,0 +1,53 @@
+name: yarp-demo
+
+services:
+  yarp:
+    build:
+      context: ..
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./yarp.yml:/etc/yarp/yarp.yml:ro
+      - ./routes.yml:/etc/yarp/routes.yml:ro
+    depends_on:
+      - lgtm
+
+  # Three servers behind the "app" route.
+  app-1:
+    image: hashicorp/http-echo
+    command: ["-text=hello from app-1"]
+  app-2:
+    image: hashicorp/http-echo
+    command: ["-text=hello from app-2"]
+  app-3:
+    image: hashicorp/http-echo
+    command: ["-text=hello from app-3"]
+
+  # The server behind the "docs" route.
+  docs:
+    image: hashicorp/http-echo
+    command: ["-text=the docs site"]
+
+  # Receives yarp's metrics, traces and logs. Grafana is on http://localhost:3000.
+  lgtm:
+    image: grafana/otel-lgtm:0.35.0
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./grafana-dashboards.yml:/otel-lgtm/grafana/conf/provisioning/dashboards/yarp.yml:ro
+      - ../contrib/grafana/yarp.json:/yarp-dashboards/yarp.json:ro
+
+  # Sends a steady trickle of requests so the dashboard has data.
+  traffic:
+    image: curlimages/curl:8.11.1
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        while true; do
+          curl -s -o /dev/null http://yarp:8080/app
+          curl -s -o /dev/null -H 'Host: docs.localhost' http://yarp:8080/
+          sleep 1
+        done
+    depends_on:
+      - yarp

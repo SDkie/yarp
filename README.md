@@ -73,6 +73,41 @@ Run:
 
 A request to `http://example.com:8080/api/users` is forwarded to one of the two servers. Requests that match no route get `404`.
 
+## Demo
+
+`demo/` is a Docker Compose stack that runs yarp with everything around it. You only need Docker.
+
+```sh
+cd demo
+docker compose up --build
+```
+
+It starts:
+
+- **yarp**, built from the `Dockerfile` and listening on `localhost:8080`. Its config is `demo/yarp.yml` and `demo/routes.yml`, mounted into the container, so you can edit them and run `docker compose restart yarp`.
+- **Servers** behind two routes:
+  - `/app` goes round-robin to `app-1`, `app-2` and `app-3`;
+  - the host `docs.localhost` goes to `docs`.
+- **Grafana LGTM** (`grafana/otel-lgtm`) at <http://localhost:3000> (login `admin` / `admin`). yarp sends its metrics, traces and logs there, and the dashboard in `contrib/grafana/yarp.json` is already loaded.
+- **A traffic generator** that sends a few requests a second, so the dashboard has data right away.
+
+Things to try:
+
+```sh
+# Load balancing: the reply cycles through app-1, app-2, app-3
+curl localhost:8080/app
+
+# Host routing
+curl -H 'Host: docs.localhost' localhost:8080/
+
+# No matching route: 404
+curl -i localhost:8080/nope
+```
+
+In Grafana, open **Dashboards → yarp** for traffic, status codes, yarp's own overhead and backends. Use **Explore** with Tempo for traces and Loki for logs.
+
+Stop and remove everything with `docker compose down`. If port 8080 or 3000 is busy, stop what uses it; for Grafana you can instead run `GRAFANA_PORT=3001 docker compose up --build`.
+
 ## Grafana dashboard
 
 `contrib/grafana/yarp.json` is a Grafana dashboard for yarp's OpenTelemetry data: traffic, status codes, cache results, yarp's own overhead, backends, Go runtime, traces and logs. It expects the metrics in Prometheus, the traces in Tempo and the logs in Loki, as in the [`grafana/otel-lgtm`](https://github.com/grafana/docker-otel-lgtm) image.

@@ -1,0 +1,18 @@
+routes:
+  # Path routing and round-robin load balancing across three servers.
+  app:
+    pathPrefix: /app
+    entryPoints:
+      - web
+    servers:
+      - url: http://app-1:5678
+      - url: http://app-2:5678
+      - url: http://app-3:5678
+
+  # Host routing.
+  docs:
+    host: docs.localhost
+    entryPoints:
+      - web
+    servers:
+      - url: http://docs:5678

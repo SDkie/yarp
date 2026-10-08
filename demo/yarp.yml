@@ -1,0 +1,16 @@
+entryPoints:
+  web:
+    address: :8080
+
+providers:
+  file:
+    filename: /etc/yarp/routes.yml
+
+cache:
+  enabled: true
+
+log:
+  level: INFO
+
+otel:
+  endpoint: http://lgtm:4318

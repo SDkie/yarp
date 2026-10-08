@@ -1,0 +1,7 @@
+apiVersion: 1
+
+providers:
+  - name: yarp
+    type: file
+    options:
+      path: /yarp-dashboards
