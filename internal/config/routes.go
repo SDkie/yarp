@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // routesFile is the routes file read by the file provider.
@@ -82,6 +83,10 @@ func (rf routesFile) validate(entryPoints map[string]EntryPoint) error {
 	}
 	// Sorted so the reported error is the same on every run.
 	for _, name := range slices.Sorted(maps.Keys(rf.Routes)) {
+		// Route names are part of cache keys, which separate fields with spaces.
+		if strings.ContainsFunc(name, unicode.IsSpace) {
+			return fmt.Errorf("routes.%q: name must not contain whitespace", name)
+		}
 		if err := rf.Routes[name].validate(entryPoints); err != nil {
 			return fmt.Errorf("routes.%s: %w", name, err)
 		}

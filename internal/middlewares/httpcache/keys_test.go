@@ -20,22 +20,25 @@ func TestGetVaryKey(t *testing.T) {
 	t.Parallel()
 	r := httptest.NewRequest("GET", "http://example.com/products?page=2", nil)
 
-	key, plain := getVaryKey("GET", r)
-	if want := "GET example.com/products?page=2"; plain != want {
+	key, plain := getVaryKey("shop", "GET", r)
+	if want := "shop GET example.com/products?page=2"; plain != want {
 		t.Errorf("plain = %q, want %q", plain, want)
 	}
 	if want := "vary:" + sha(plain); key != want {
 		t.Errorf("key = %q, want %q", key, want)
 	}
-	if headKey, _ := getVaryKey("HEAD", r); headKey == key {
+	if headKey, _ := getVaryKey("shop", "HEAD", r); headKey == key {
 		t.Error("GET and HEAD share a Vary key")
+	}
+	if otherKey, _ := getVaryKey("admin", "GET", r); otherKey == key {
+		t.Error("two routes share a Vary key")
 	}
 }
 
 // TestGetRespKey checks the response key built from the request's Vary header values.
 func TestGetRespKey(t *testing.T) {
 	t.Parallel()
-	const base = "GET example.com/products?page=2"
+	const base = "shop GET example.com/products?page=2"
 	tests := []struct {
 		name      string
 		header    []string
@@ -56,7 +59,7 @@ func TestGetRespKey(t *testing.T) {
 			for i := 0; i+1 < len(tt.header); i += 2 {
 				r.Header.Add(tt.header[i], tt.header[i+1])
 			}
-			key, plain := getRespKey(r, tt.varyNames)
+			key, plain := getRespKey("shop", r, tt.varyNames)
 			if plain != tt.want {
 				t.Errorf("plain = %q, want %q", plain, tt.want)
 			}

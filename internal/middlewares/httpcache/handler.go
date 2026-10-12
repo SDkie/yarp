@@ -21,18 +21,20 @@ const (
 	cacheResultBypass = "bypass"
 )
 
-// Handler returns next wrapped with the HTTP cache: responses to GET and HEAD
-// are stored in s and reused while fresh, following the rules in the
-// package doc. s must not be nil; each request's cache result is reported
-// with telemetry.SetCacheResult.
-func Handler(s Store, next http.Handler) http.Handler {
-	return &handler{s: s, next: next}
+// Handler returns next, the handler of the named route, wrapped with the
+// HTTP cache: responses to GET and HEAD are stored in s and reused while
+// fresh, following the rules in the package doc. Responses are kept per
+// route, so routes sharing s never serve each other's. s must not be nil;
+// each request's cache result is reported with telemetry.SetCacheResult.
+func Handler(s Store, route string, next http.Handler) http.Handler {
+	return &handler{s: s, route: route, next: next}
 }
 
 // handler is the middleware returned by Handler.
 type handler struct {
-	s    Store
-	next http.Handler
+	s     Store
+	route string
+	next  http.Handler
 }
 
 // ServeHTTP answers r from the cache (hit.go), forwards it and stores the
@@ -78,7 +80,7 @@ func (h *handler) serveUnsafe(w http.ResponseWriter, r *http.Request) {
 // unreachable.
 func (h *handler) invalidate(r *http.Request) {
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
-		key, plain := getVaryKey(method, r)
+		key, plain := getVaryKey(h.route, method, r)
 		if err := h.s.Delete(key); err != nil {
 			slog.ErrorContext(r.Context(), "cache invalidation failed", "key", plain, "error", err)
 		}

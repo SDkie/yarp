@@ -88,7 +88,7 @@ func newHandlers(
 		var h http.Handler = proxy.New(name, serverURLs(cfg.Servers), transport)
 		// Outside the proxy, so a hit never reaches the backend.
 		if store != nil {
-			h = httpcache.Handler(store, h)
+			h = httpcache.Handler(store, name, h)
 		}
 
 		// Built once, so a route on two entry points shares one round-robin.

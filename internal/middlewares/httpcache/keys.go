@@ -16,7 +16,8 @@ import (
 // A Vary record says which request headers select the URL's responses:
 //
 //	key:   "vary:" + hex(sha256(base))
-//	base:  method, host, path and query, e.g. "GET example.com/products?page=2"
+//	base:  route name, method, host, path and query, e.g.
+//	       "shop GET example.com/products?page=2"
 //	value: varyRecord{Key: base, Names: []string{"Accept-Encoding"}}
 //
 // A response record holds one response for one combination of those
@@ -24,7 +25,7 @@ import (
 //
 //	key:     "resp:" + hex(sha256(variant))
 //	variant: base plus one line per Vary header name, in sorted order, e.g.
-//	         "GET example.com/products?page=2\nAccept-Encoding: gzip,br";
+//	         "shop GET example.com/products?page=2\nAccept-Encoding: gzip,br";
 //	         a header the request lacks gives "\nAccept-Encoding absent".
 //	         Without a Vary header, variant is base.
 //	value:   record{Key: variant, Status, Header, Body, GeneratedAt, ExpiresAt}
@@ -34,6 +35,9 @@ import (
 // HEAD Vary records, which leaves its response records unreachable until
 // they expire.
 //
+// The route name keeps routes that match the same URL, on different entry
+// points, from serving each other's responses.
+//
 // Hashing keeps keys short and keeps URLs, which can carry tokens, out of
 // key names. Each value stores its plain key, which is compared on read, so
 // an entry whose hash collides with another URL or variant is never served.
@@ -42,21 +46,21 @@ const (
 	respPrefix = "resp:" // response records
 )
 
-// getVaryKey returns the storage key of the Vary record for method and r's
-// URL, and the plain base key it is hashed from.
-func getVaryKey(method string, r *http.Request) (key, plain string) {
-	plain = getBaseKey(method, r)
+// getVaryKey returns the storage key of the Vary record for route, method
+// and r's URL, and the plain base key it is hashed from.
+func getVaryKey(route, method string, r *http.Request) (key, plain string) {
+	plain = getBaseKey(route, method, r)
 	return getHashKey(varyPrefix, plain), plain
 }
 
-// getRespKey returns the storage key of the response stored for r and the
-// plain key it is hashed from: the base key plus r's values for the Vary
-// header names, one "\n"-separated line each. A header r does not send is
+// getRespKey returns the storage key of the response stored for r on route
+// and the plain key it is hashed from: the base key plus r's values for the
+// Vary header names, one "\n"-separated line each. A header r does not send is
 // marked absent, so it only matches requests that also lack it. Header
 // values cannot contain "\n".
-func getRespKey(r *http.Request, names []string) (key, plain string) {
+func getRespKey(route string, r *http.Request, names []string) (key, plain string) {
 	var b strings.Builder
-	b.WriteString(getBaseKey(r.Method, r))
+	b.WriteString(getBaseKey(route, r.Method, r))
 	for _, name := range names {
 		values := r.Header.Values(name)
 		b.WriteString("\n")
@@ -72,10 +76,12 @@ func getRespKey(r *http.Request, names []string) (key, plain string) {
 	return getHashKey(respPrefix, plain), plain
 }
 
-// getBaseKey returns the plain base key of method and r's URL: method,
-// host, path and query, e.g. "GET example.com/products?page=2".
-func getBaseKey(method string, r *http.Request) string {
-	return method + " " + r.Host + r.URL.RequestURI()
+// getBaseKey returns the plain base key of route, method and r's URL: route
+// name, method, host, path and query, e.g.
+// "shop GET example.com/products?page=2". None of the fields can contain a
+// space; config rejects route names with whitespace.
+func getBaseKey(route, method string, r *http.Request) string {
+	return route + " " + method + " " + r.Host + r.URL.RequestURI()
 }
 
 // getHashKey returns the storage key for a plain key: prefix plus the hex

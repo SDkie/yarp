@@ -35,15 +35,15 @@ func TestSave(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			s := newMemStore()
-			h := &handler{s: s}
+			h := &handler{s: s, route: "app"}
 			r := newRequest()
 			generatedAt, expiresAt := time.Now(), time.Now().Add(time.Minute)
 
 			h.save(r, recorded(), generatedAt, expiresAt)
 			synctest.Wait()
 
-			respKey, respPlain := getRespKey(r, []string{"Accept-Encoding"})
-			varyKey, varyPlain := getVaryKey(http.MethodGet, r)
+			respKey, respPlain := getRespKey("app", r, []string{"Accept-Encoding"})
+			varyKey, varyPlain := getVaryKey("app", http.MethodGet, r)
 			if want := []string{respKey, varyKey}; !slices.Equal(s.setKeys, want) {
 				t.Fatalf("Set keys = %q, want %q", s.setKeys, want)
 			}
@@ -67,10 +67,10 @@ func TestSave(t *testing.T) {
 			s.failSetPrefix = respPrefix
 			r := newRequest()
 
-			(&handler{s: s}).save(r, recorded(), time.Now(), time.Now().Add(time.Minute))
+			(&handler{s: s, route: "app"}).save(r, recorded(), time.Now(), time.Now().Add(time.Minute))
 			synctest.Wait()
 
-			respKey, _ := getRespKey(r, []string{"Accept-Encoding"})
+			respKey, _ := getRespKey("app", r, []string{"Accept-Encoding"})
 			if want := []string{respKey}; !slices.Equal(s.setKeys, want) {
 				t.Errorf("Set keys = %q, want only the response record %q", s.setKeys, want)
 			}
@@ -85,7 +85,7 @@ func TestSave(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			s := newMemStore()
-			(&handler{s: s}).save(newRequest(), recorded(), time.Now().Add(-time.Minute), time.Now())
+			(&handler{s: s, route: "app"}).save(newRequest(), recorded(), time.Now().Add(-time.Minute), time.Now())
 			synctest.Wait()
 
 			if len(s.setKeys) != 0 {

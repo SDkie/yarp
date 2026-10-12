@@ -36,7 +36,7 @@ func (h *handler) save(r *http.Request, rec *recorder, generatedAt, expiresAt ti
 	}
 
 	names, _ := getVaryNames(rec.header) // Vary: * was rejected by isStorable.
-	respKey, respPlain := getRespKey(r, names)
+	respKey, respPlain := getRespKey(h.route, r, names)
 	e := &record{
 		Key:         respPlain,
 		Status:      rec.status,
@@ -45,7 +45,7 @@ func (h *handler) save(r *http.Request, rec *recorder, generatedAt, expiresAt ti
 		GeneratedAt: generatedAt,
 		ExpiresAt:   expiresAt,
 	}
-	varyKey, varyPlain := getVaryKey(r.Method, r)
+	varyKey, varyPlain := getVaryKey(h.route, r.Method, r)
 	vary := &varyRecord{Key: varyPlain, Names: names}
 	// Keeps the trace for logs, without r's cancellation.
 	ctx := context.WithoutCancel(r.Context())

@@ -13,12 +13,12 @@ import (
 // lookup returns the stored response for r while it is fresh, or nil. A
 // stale response is fetched again: yarp cannot validate it yet.
 func (h *handler) lookup(r *http.Request) *record {
-	varyKey, varyPlain := getVaryKey(r.Method, r)
+	varyKey, varyPlain := getVaryKey(h.route, r.Method, r)
 	var vary varyRecord
 	if !load(r.Context(), h.s, varyKey, &vary) || vary.Key != varyPlain {
 		return nil
 	}
-	respKey, respPlain := getRespKey(r, vary.Names)
+	respKey, respPlain := getRespKey(h.route, r, vary.Names)
 	var e record
 	if !load(r.Context(), h.s, respKey, &e) || e.Key != respPlain || !time.Now().Before(e.ExpiresAt) {
 		return nil

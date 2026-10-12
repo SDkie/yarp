@@ -105,7 +105,7 @@ type cacheTest struct {
 
 func newCacheTest(t *testing.T, backend http.HandlerFunc) *cacheTest {
 	ct := &cacheTest{t: t, store: newMemStore(), backend: backend}
-	ct.h = Handler(ct.store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ct.h = Handler(ct.store, "app", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ct.calls++
 		ct.backend(w, r)
 	}))
@@ -584,6 +584,48 @@ func TestBackendCacheStatusKept(t *testing.T) {
 	})
 }
 
+// TestRoutesKeptApart checks that routes sharing a store, matching the same
+// URL, never serve or invalidate each other's responses.
+func TestRoutesKeptApart(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		store := newMemStore()
+		calls := map[string]int{}
+		newRoute := func(name string) http.Handler {
+			return Handler(store, name, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls[name]++
+				w.Header().Set("Cache-Control", "max-age=60")
+				io.WriteString(w, name)
+			}))
+		}
+		public, admin := newRoute("public"), newRoute("admin")
+		do := func(h http.Handler, method, wantCacheStatus, wantBody string) {
+			t.Helper()
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest(method, "http://example.com/a", nil))
+			synctest.Wait()
+			if got := w.Header().Get("Cache-Status"); got != wantCacheStatus {
+				t.Errorf("%s: Cache-Status = %q, want %q", method, got, wantCacheStatus)
+			}
+			if got := w.Body.String(); wantBody != "" && got != wantBody {
+				t.Errorf("%s: body = %q, want %q", method, got, wantBody)
+			}
+		}
+
+		do(public, "GET", miss, "public")
+		do(admin, "GET", miss, "admin") // Not public's copy.
+		do(public, "GET", hit, "public")
+		do(admin, "GET", hit, "admin")
+
+		do(admin, "POST", bypass, "")
+		do(admin, "GET", miss, "admin")
+		do(public, "GET", hit, "public") // Only admin's copy was invalidated.
+		if calls["public"] != 1 || calls["admin"] != 3 {
+			t.Errorf("backend calls = %v, want public 1, admin 3", calls)
+		}
+	})
+}
+
 // TestKeyIncludesHostAndQuery checks that host and query select separate entries.
 func TestKeyIncludesHostAndQuery(t *testing.T) {
 	t.Parallel()
@@ -636,8 +678,8 @@ func TestStoreFailures(t *testing.T) {
 func TestUnreadableEntriesAreMisses(t *testing.T) {
 	t.Parallel()
 	r := httptest.NewRequest("GET", "http://example.com/a", nil)
-	varyKey, _ := getVaryKey("GET", r)
-	respKey, respPlain := getRespKey(r, nil)
+	varyKey, _ := getVaryKey("app", "GET", r)
+	respKey, respPlain := getRespKey("app", r, nil)
 
 	tests := []struct {
 		name    string
@@ -647,7 +689,7 @@ func TestUnreadableEntriesAreMisses(t *testing.T) {
 			s.Set(varyKey, []byte("garbage"), 0)
 		}},
 		{"Vary record for another URL", func(s *memStore) {
-			store(context.Background(), s, varyKey, &varyRecord{Key: "GET example.com/other"}, 0)
+			store(context.Background(), s, varyKey, &varyRecord{Key: "app GET example.com/other"}, 0)
 		}},
 		{"corrupt response record", func(s *memStore) {
 			s.Set(respKey, []byte("garbage"), 0)
@@ -692,7 +734,7 @@ func TestAbortedResponseNotStored(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := newMemStore()
 		calls := 0
-		h := Handler(store, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := Handler(store, "app", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			calls++
 			// What the proxy does when the backend fails mid-body.
 			w.Header().Set("Cache-Control", "max-age=60")

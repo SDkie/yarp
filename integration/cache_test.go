@@ -263,6 +263,56 @@ routes:
 	get("b.test", cacheHit)
 }
 
+// cacheWebAdminConfig is a config file with two entry points, "web" and
+// "admin", and the cache on.
+const cacheWebAdminConfig = `
+entryPoints:
+  web:
+    address: 127.0.0.1:0
+  admin:
+    address: 127.0.0.1:0
+providers:
+  file:
+    filename: routes.yml
+cache:
+  enabled: true
+`
+
+// TestCacheKeyedByRoute checks that two routes matching the same URL, on
+// different entry points, never serve each other's cached responses.
+func TestCacheKeyedByRoute(t *testing.T) {
+	t.Parallel()
+	routes := fmt.Sprintf(`
+routes:
+  public:
+    host: app.test
+    entryPoints: [web]
+    servers: [{url: %s}]
+  private:
+    host: app.test
+    entryPoints: [admin]
+    servers: [{url: %s}]
+`,
+		newBackend(t, cacheable("public")),
+		newBackend(t, cacheable("private")),
+	)
+	store := openStore(t, t.TempDir())
+	y := startYarpWith(t, cacheWebAdminConfig, routes, store, nil)
+
+	get := func(entryPoint, wantCacheStatus, wantBody string) {
+		t.Helper()
+		req := newRequest(t, http.MethodGet, y.url(entryPoint, "/page"), "")
+		req.Host = "app.test" // Same URL on both entry points.
+		fetch(t, req, wantCacheStatus, wantBody)
+	}
+	get("web", cacheMiss, "public")
+	store.waitSets(t, setsPerResponse)
+	get("admin", cacheMiss, "private")
+	store.waitSets(t, setsPerResponse)
+	get("web", cacheHit, "public")
+	get("admin", cacheHit, "private")
+}
+
 // TestCacheSurvivesRestart checks that a response cached before a restart is
 // served from the same store after it.
 func TestCacheSurvivesRestart(t *testing.T) {
