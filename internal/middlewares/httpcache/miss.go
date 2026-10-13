@@ -24,12 +24,13 @@ func (h *handler) serveMiss(w http.ResponseWriter, r *http.Request) {
 	}
 	h.next.ServeHTTP(rec, r)
 	if rec.storable() {
-		h.save(r, rec, generatedAt, expiresAt)
+		h.save(r, rec, requestTime, generatedAt, expiresAt)
 	}
 }
 
-// save stores the response recorded for r until expiresAt, writing it in a new goroutine.
-func (h *handler) save(r *http.Request, rec *recorder, generatedAt, expiresAt time.Time) {
+// save stores the response recorded for r, sent at requestTime, until
+// expiresAt, writing it in a new goroutine.
+func (h *handler) save(r *http.Request, rec *recorder, requestTime, generatedAt, expiresAt time.Time) {
 	ttl := time.Until(expiresAt)
 	if ttl <= 0 {
 		return
@@ -44,16 +45,25 @@ func (h *handler) save(r *http.Request, rec *recorder, generatedAt, expiresAt ti
 		Body:        rec.body.Bytes(),
 		GeneratedAt: generatedAt,
 		ExpiresAt:   expiresAt,
+		RequestTime: requestTime,
 	}
 	varyKey, varyPlain := getVaryKey(h.route, r.Method, r)
-	vary := &varyRecord{Key: varyPlain, Names: names}
 	// Keeps the trace for logs, without r's cancellation.
 	ctx := context.WithoutCancel(r.Context())
 
 	go func() {
+		// An existing RequestTime is kept, so other variants stay fresh.
+		var vary varyRecord
+		if !load(ctx, h.s, varyKey, &vary) || vary.Key != varyPlain {
+			vary = varyRecord{Key: varyPlain, RequestTime: requestTime}
+		}
+		if requestTime.Before(vary.RequestTime) {
+			return // Already stale.
+		}
+		vary.Names = names
 		// The response first, so the Vary record never points to nothing.
 		if store(ctx, h.s, respKey, e, ttl) {
-			store(ctx, h.s, varyKey, vary, ttl)
+			store(ctx, h.s, varyKey, &vary, ttl)
 		}
 	}()
 }

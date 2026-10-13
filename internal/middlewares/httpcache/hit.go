@@ -11,7 +11,8 @@ import (
 )
 
 // lookup returns the stored response for r while it is fresh, or nil. A
-// stale response is fetched again: yarp cannot validate it yet.
+// stale response, or one requested before its Vary record was created, is
+// fetched again: yarp cannot validate it yet.
 func (h *handler) lookup(r *http.Request) *record {
 	varyKey, varyPlain := getVaryKey(h.route, r.Method, r)
 	var vary varyRecord
@@ -20,7 +21,8 @@ func (h *handler) lookup(r *http.Request) *record {
 	}
 	respKey, respPlain := getRespKey(h.route, r, vary.Names)
 	var e record
-	if !load(r.Context(), h.s, respKey, &e) || e.Key != respPlain || !time.Now().Before(e.ExpiresAt) {
+	if !load(r.Context(), h.s, respKey, &e) || e.Key != respPlain || !time.Now().Before(e.ExpiresAt) ||
+		e.RequestTime.Before(vary.RequestTime) {
 		return nil
 	}
 	return &e

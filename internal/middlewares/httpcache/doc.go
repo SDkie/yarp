@@ -22,7 +22,7 @@
 //     stored responses expire from the store once stale.
 //   - Responses served from the cache carry an Age header (section 4).
 //   - A 2xx or 3xx response to an unsafe method invalidates the cached
-//     GET and HEAD responses for its URL (section 4.4).
+//     GET and HEAD responses for its URL, every Vary variant (section 4.4).
 //   - Every response gets a Cache-Status entry: hit, miss or bypass (RFC
 //     9211).
 package httpcache

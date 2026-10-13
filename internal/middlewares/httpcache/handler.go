@@ -76,8 +76,8 @@ func (h *handler) serveUnsafe(w http.ResponseWriter, r *http.Request) {
 }
 
 // invalidate drops the cached GET and HEAD responses for r's URL by
-// deleting their Vary records, which makes every stored variant
-// unreachable.
+// deleting their Vary records. Every stored variant is then unreachable,
+// or stale once a later save creates the record again (see varyRecord.RequestTime).
 func (h *handler) invalidate(r *http.Request) {
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		key, plain := getVaryKey(h.route, method, r)

@@ -37,9 +37,9 @@ func TestSave(t *testing.T) {
 			s := newMemStore()
 			h := &handler{s: s, route: "app"}
 			r := newRequest()
-			generatedAt, expiresAt := time.Now(), time.Now().Add(time.Minute)
+			requestTime, generatedAt, expiresAt := time.Now(), time.Now(), time.Now().Add(time.Minute)
 
-			h.save(r, recorded(), generatedAt, expiresAt)
+			h.save(r, recorded(), requestTime, generatedAt, expiresAt)
 			synctest.Wait()
 
 			respKey, respPlain := getRespKey("app", r, []string{"Accept-Encoding"})
@@ -49,11 +49,13 @@ func TestSave(t *testing.T) {
 			}
 			var e record
 			if !load(context.Background(), s, respKey, &e) || e.Key != respPlain || e.Status != http.StatusOK ||
-				string(e.Body) != "body" || !e.GeneratedAt.Equal(generatedAt) || !e.ExpiresAt.Equal(expiresAt) {
+				string(e.Body) != "body" || !e.GeneratedAt.Equal(generatedAt) || !e.ExpiresAt.Equal(expiresAt) ||
+				!e.RequestTime.Equal(requestTime) {
 				t.Errorf("response record = %+v", e)
 			}
 			var v varyRecord
-			if !load(context.Background(), s, varyKey, &v) || v.Key != varyPlain || !slices.Equal(v.Names, []string{"Accept-Encoding"}) {
+			if !load(context.Background(), s, varyKey, &v) || v.Key != varyPlain || !slices.Equal(v.Names, []string{"Accept-Encoding"}) ||
+				!v.RequestTime.Equal(requestTime) {
 				t.Errorf("Vary record = %+v", v)
 			}
 		})
@@ -67,7 +69,7 @@ func TestSave(t *testing.T) {
 			s.failSetPrefix = respPrefix
 			r := newRequest()
 
-			(&handler{s: s, route: "app"}).save(r, recorded(), time.Now(), time.Now().Add(time.Minute))
+			(&handler{s: s, route: "app"}).save(r, recorded(), time.Now(), time.Now(), time.Now().Add(time.Minute))
 			synctest.Wait()
 
 			respKey, _ := getRespKey("app", r, []string{"Accept-Encoding"})
@@ -85,7 +87,50 @@ func TestSave(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			s := newMemStore()
-			(&handler{s: s, route: "app"}).save(newRequest(), recorded(), time.Now().Add(-time.Minute), time.Now())
+			(&handler{s: s, route: "app"}).save(newRequest(), recorded(), time.Now(), time.Now().Add(-time.Minute), time.Now())
+			synctest.Wait()
+
+			if len(s.setKeys) != 0 {
+				t.Errorf("Set keys = %q, want none", s.setKeys)
+			}
+		})
+	})
+
+	// An existing Vary record keeps its RequestTime.
+	t.Run("existing RequestTime kept", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			s := newMemStore()
+			r := newRequest()
+			varyKey, varyPlain := getVaryKey("app", http.MethodGet, r)
+			created := time.Now()
+			store(context.Background(), s, varyKey, &varyRecord{Key: varyPlain, RequestTime: created}, 0)
+
+			time.Sleep(time.Second)
+			(&handler{s: s, route: "app"}).save(r, recorded(), time.Now(), time.Now(), time.Now().Add(time.Minute))
+			synctest.Wait()
+
+			var v varyRecord
+			if !load(context.Background(), s, varyKey, &v) || !v.RequestTime.Equal(created) ||
+				!slices.Equal(v.Names, []string{"Accept-Encoding"}) {
+				t.Errorf("Vary record = %+v", v)
+			}
+		})
+	})
+
+	// A response requested before the Vary record was created is not written.
+	t.Run("nothing when requested before the Vary record", func(t *testing.T) {
+		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			s := newMemStore()
+			r := newRequest()
+			varyKey, varyPlain := getVaryKey("app", http.MethodGet, r)
+			sent := time.Now()
+			time.Sleep(time.Second)
+			store(context.Background(), s, varyKey, &varyRecord{Key: varyPlain, RequestTime: time.Now()}, 0)
+			s.setKeys = nil
+
+			(&handler{s: s, route: "app"}).save(r, recorded(), sent, time.Now(), time.Now().Add(time.Minute))
 			synctest.Wait()
 
 			if len(s.setKeys) != 0 {

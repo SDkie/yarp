@@ -388,6 +388,45 @@ func TestUnsafeMethodsInvalidate(t *testing.T) {
 	}
 }
 
+// TestInvalidationCoversVariants checks that invalidation makes every stored
+// Vary variant stale, and that variants stored at different times stay fresh.
+func TestInvalidationCoversVariants(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		version := 0
+		ct := newCacheTest(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "POST" {
+				version++
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.Header().Set("Cache-Control", "max-age=600")
+			w.Header().Set("Vary", "Accept-Encoding")
+			fmt.Fprintf(w, "v%d %s", version, r.Header.Get("Accept-Encoding"))
+		})
+		get := func(enc, want, body string, calls int) {
+			t.Helper()
+			resp := ct.do("GET", "/a", "Accept-Encoding", enc)
+			ct.expect(resp, http.StatusOK, want, calls)
+			if got := readBody(t, resp); got != body {
+				t.Errorf("GET %s body = %q, want %q", enc, got, body)
+			}
+		}
+
+		get("gzip", miss, "v0 gzip", 1)
+		time.Sleep(time.Second)
+		get("br", miss, "v0 br", 2)
+		get("gzip", hit, "v0 gzip", 2) // Storing br kept gzip fresh.
+
+		ct.expect(ct.do("POST", "/a"), http.StatusOK, bypass, 3)
+		time.Sleep(time.Second) // Responses requested at the Vary record's RequestTime stay fresh.
+		get("gzip", miss, "v1 gzip", 4)
+		get("br", miss, "v1 br", 5) // Not the old br, though gzip created the Vary record again.
+		get("gzip", hit, "v1 gzip", 5)
+		get("br", hit, "v1 br", 5)
+	})
+}
+
 // TestNeverStored checks responses that must never be stored.
 func TestNeverStored(t *testing.T) {
 	t.Parallel()

@@ -18,7 +18,7 @@ import (
 //	key:   "vary:" + hex(sha256(base))
 //	base:  route name, method, host, path and query, e.g.
 //	       "shop GET example.com/products?page=2"
-//	value: varyRecord{Key: base, Names: []string{"Accept-Encoding"}}
+//	value: varyRecord{Key: base, Names: []string{"Accept-Encoding"}, RequestTime}
 //
 // A response record holds one response for one combination of those
 // headers' values:
@@ -28,12 +28,13 @@ import (
 //	         "shop GET example.com/products?page=2\nAccept-Encoding: gzip,br";
 //	         a header the request lacks gives "\nAccept-Encoding absent".
 //	         Without a Vary header, variant is base.
-//	value:   record{Key: variant, Status, Header, Body, GeneratedAt, ExpiresAt}
+//	value:   record{Key: variant, Status, Header, Body, GeneratedAt, ExpiresAt, RequestTime}
 //
 // A lookup reads the Vary record for base, builds variant from the request
 // and reads that response record. Invalidating a URL deletes its GET and
-// HEAD Vary records, which leaves its response records unreachable until
-// they expire.
+// HEAD Vary records. A response record whose RequestTime is before its Vary
+// record's RequestTime predates the invalidation, so it is stale and left to
+// expire.
 //
 // The route name keeps routes that match the same URL, on different entry
 // points, from serving each other's responses.

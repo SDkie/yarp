@@ -32,6 +32,10 @@ type record struct {
 	// the time since GeneratedAt.
 	GeneratedAt time.Time
 	ExpiresAt   time.Time
+
+	// When yarp sent the request (request_time, RFC 9111 section 4.2.3);
+	// the response is stale if this is before its Vary record's RequestTime.
+	RequestTime time.Time
 }
 
 // varyRecord holds the Vary header names of the responses stored for a URL,
@@ -40,6 +44,11 @@ type record struct {
 type varyRecord struct {
 	Key   string // plain base key
 	Names []string
+
+	// The RequestTime of the response that created the record. Later saves
+	// keep it; invalidation deletes the record, so responses requested
+	// before it was created are stale (RFC 9111 section 4.4).
+	RequestTime time.Time
 }
 
 // load decodes the value stored under key into v. Missing keys and read or
